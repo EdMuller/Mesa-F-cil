@@ -4,7 +4,9 @@ import { Establishment } from '../types';
 import Header from './Header';
 import CustomerView from './CustomerView';
 import ShareIcon from './icons/ShareIcon';
+import UserIcon from './icons/UserIcon';
 import ShareModal from './ShareModal';
+import ProfileModal from './ProfileModal';
 import { APP_URL } from '../constants';
 
 const CustomerHome: React.FC = () => {
@@ -23,6 +25,7 @@ const CustomerHome: React.FC = () => {
   const [phoneToAdd, setPhoneToAdd] = useState('');
   const [error, setError] = useState('');
   const [isShareAppOpen, setShareAppOpen] = useState(false);
+  const [isProfileOpen, setProfileOpen] = useState(false);
 
   const favorited = useMemo(() => {
     if (!currentCustomerProfile) return [];
@@ -147,9 +150,12 @@ const CustomerHome: React.FC = () => {
           </div>
       )}
       
-       <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-2 flex justify-center items-center gap-4 sm:gap-6">
+       <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-2 flex justify-around items-center">
           <button onClick={() => setShareAppOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
-              <ShareIcon /> <span className="text-xs sm:text-base">Compartilhar App</span>
+              <ShareIcon /> <span className="text-xs sm:text-base">Compartilhar</span>
+          </button>
+          <button onClick={() => setProfileOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
+              <UserIcon /> <span className="text-xs sm:text-base">Meu Perfil</span>
           </button>
       </div>
       <ShareModal 
@@ -159,6 +165,7 @@ const CustomerHome: React.FC = () => {
         text="Convide outros estabelecimentos e clientes a usarem o aplicativo."
         url={APP_URL}
       />
+      <ProfileModal isOpen={isProfileOpen} onClose={() => setProfileOpen(false)} />
     </div>
   );
 };

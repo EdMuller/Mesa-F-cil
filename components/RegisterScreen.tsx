@@ -90,6 +90,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ role, onBack }) => {
                                         </label>
                                         <input id="photo-upload" name="photo-upload" type="file" className="sr-only" onChange={handlePhotoUpload} accept="image/*" />
                                         <button type="button" onClick={() => setShowCamera(true)} className="bg-white py-2 px-3 border border-gray-300 rounded-md shadow-sm text-sm leading-4 font-medium text-gray-700 hover:bg-gray-50">Tirar Foto</button>
+                                        {photo && <button type="button" onClick={() => setPhoto(null)} className="bg-red-100 py-1 px-2 border border-red-200 rounded-md text-sm text-red-700 hover:bg-red-200">Limpar Foto</button>}
                                     </div>
                                 </div>
                             </div>
@@ -116,12 +117,12 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ role, onBack }) => {
 const CameraCapture: React.FC<{onCapture: (data: string) => void, onCancel: () => void}> = ({ onCapture, onCancel }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [stream, setStream] = useState<MediaStream|null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
 
     const startCamera = useCallback(async () => {
         try {
             const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            setStream(mediaStream);
+            streamRef.current = mediaStream;
             if (videoRef.current) {
                 videoRef.current.srcObject = mediaStream;
             }
@@ -135,9 +136,9 @@ const CameraCapture: React.FC<{onCapture: (data: string) => void, onCancel: () =
     useEffect(() => {
         startCamera();
         return () => {
-            stream?.getTracks().forEach(track => track.stop());
+            streamRef.current?.getTracks().forEach(track => track.stop());
         }
-    }, [startCamera, stream]);
+    }, [startCamera]);
 
     const handleCapture = () => {
         if (videoRef.current && canvasRef.current) {
@@ -147,7 +148,7 @@ const CameraCapture: React.FC<{onCapture: (data: string) => void, onCancel: () =
             context?.drawImage(videoRef.current, 0, 0, videoRef.current.videoWidth, videoRef.current.videoHeight);
             const dataUrl = canvasRef.current.toDataURL('image/jpeg');
             onCapture(dataUrl);
-            stream?.getTracks().forEach(track => track.stop());
+            streamRef.current?.getTracks().forEach(track => track.stop());
         }
     };
 

@@ -1,13 +1,19 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Role, User, Establishment, CallType, SemaphoreStatus, Table, CallStatus, Call } from '../types';
+import { Role, User, Establishment, CallType, SemaphoreStatus, Table, CallStatus, Call, UserStatus } from '../types';
 import Header from './Header';
 import CustomerView from './CustomerView'; // Re-using for simulation
-import EstablishmentDashboard from './EstablishmentDashboard'; // Re-using for simulation
+import StatisticsView from './StatisticsView';
+
+const USER_STATUS_TRANSLATION: { [key in UserStatus]: string } = {
+  [UserStatus.TESTING]: 'Testando',
+  [UserStatus.SUBSCRIBER]: 'Assinante',
+  [UserStatus.DISCONNECTED]: 'Desconectado',
+};
 
 const AdminDashboard: React.FC = () => {
     const { logout } = useAppContext();
-    const [view, setView] = useState<'users' | 'simulation'>('users');
+    const [view, setView] = useState<'users' | 'simulation' | 'stats'>('users');
 
     return (
         <div className="min-h-screen bg-gray-100">
@@ -16,10 +22,12 @@ const AdminDashboard: React.FC = () => {
                 <div className="flex justify-center border-b border-gray-300 mb-6">
                     <TabButton label="Gerenciar Usuários" isActive={view === 'users'} onClick={() => setView('users')} />
                     <TabButton label="Simulação em Tempo Real" isActive={view === 'simulation'} onClick={() => setView('simulation')} />
+                    <TabButton label="Estatísticas" isActive={view === 'stats'} onClick={() => setView('stats')} />
                 </div>
 
                 {view === 'users' && <UserManagementSection />}
                 {view === 'simulation' && <SimulationSection />}
+                {view === 'stats' && <StatisticsSection />}
             </main>
         </div>
     );
@@ -37,7 +45,7 @@ const TabButton: React.FC<{ label: string; isActive: boolean; onClick: () => voi
 );
 
 const UserManagementSection = () => {
-    const { users, registerCustomer, registerEstablishment } = useAppContext();
+    const { users, registerCustomer, registerEstablishment, updateUserStatus } = useAppContext();
     const [formType, setFormType] = useState<Role.CUSTOMER | Role.ESTABLISHMENT>(Role.CUSTOMER);
     const [feedback, setFeedback] = useState('');
 
@@ -63,10 +71,23 @@ const UserManagementSection = () => {
             <div className="bg-white p-6 rounded-lg shadow">
                 <h2 className="text-2xl font-bold mb-4">Usuários Cadastrados</h2>
                 <div className="max-h-96 overflow-y-auto space-y-2">
-                    {users.map(user => (
-                        <div key={user.id} className="p-2 border rounded-md bg-gray-50">
-                            <p className="font-semibold">{user.name} <span className="text-xs font-normal bg-blue-100 text-blue-700 px-1 rounded">{user.role}</span></p>
-                            <p className="text-sm text-gray-600">{user.email}</p>
+                    {users.filter(u => u.role !== Role.ADMIN).map(user => (
+                        <div key={user.id} className="p-3 border rounded-md bg-gray-50 flex flex-col sm:flex-row justify-between sm:items-center">
+                           <div>
+                                <p className="font-semibold">{user.name} <span className="text-xs font-normal bg-blue-100 text-blue-700 px-1 py-0.5 rounded-full">{user.role}</span></p>
+                                <p className="text-sm text-gray-600">{user.email}</p>
+                           </div>
+                           <div className="mt-2 sm:mt-0">
+                                <select 
+                                    value={user.status}
+                                    onChange={(e) => updateUserStatus(user.id, e.target.value as UserStatus)}
+                                    className="w-full sm:w-auto p-1 border border-gray-300 rounded-md text-sm"
+                                >
+                                    {Object.values(UserStatus).map(s => (
+                                        <option key={s} value={s}>{USER_STATUS_TRANSLATION[s]}</option>
+                                    ))}
+                                </select>
+                           </div>
                         </div>
                     ))}
                 </div>
@@ -141,6 +162,7 @@ const RegistrationForm: React.FC<{ type: Role.CUSTOMER | Role.ESTABLISHMENT, onS
                                 <label htmlFor="photo-upload-admin" className="cursor-pointer bg-white py-1 px-2 border rounded-md text-sm hover:bg-gray-50 text-center">Arquivo</label>
                                 <input id="photo-upload-admin" type="file" className="sr-only" onChange={handlePhotoUpload} accept="image/*" />
                                 <button type="button" onClick={() => setShowCamera(true)} className="bg-white py-1 px-2 border rounded-md text-sm hover:bg-gray-50">Câmera</button>
+                                {photo && <button type="button" onClick={() => setPhoto(null)} className="bg-red-100 py-1 px-2 border border-red-200 rounded-md text-sm text-red-700 hover:bg-red-200">Limpar</button>}
                             </div>
                         </div>
                     </div>
@@ -231,6 +253,34 @@ const SimulationSection = () => {
     );
 };
 
+const StatisticsSection = () => {
+    const { establishments } = useAppContext();
+    const [selectedEstablishmentId, setSelectedEstablishmentId] = useState<string>('');
+
+    const establishmentList = useMemo(() => Array.from(establishments.values()), [establishments]);
+    const selectedEstablishment = establishments.get(selectedEstablishmentId);
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow">
+            <h2 className="text-2xl font-bold mb-4">Estatísticas por Estabelecimento</h2>
+            <div className="mb-6">
+                <label htmlFor="est-select" className="block text-sm font-medium text-gray-700 mb-1">Selecione um estabelecimento</label>
+                <select id="est-select" value={selectedEstablishmentId} onChange={(e) => setSelectedEstablishmentId(e.target.value)} className="w-full max-w-xs p-2 border border-gray-300 rounded-md">
+                    <option value="">Selecione...</option>
+                    {establishmentList.map(est => <option key={est.id} value={est.id}>{est.name}</option>)}
+                </select>
+            </div>
+
+            {selectedEstablishment ? (
+                <StatisticsView establishment={selectedEstablishment} />
+            ) : (
+                <p className="text-gray-500 text-center py-8">Selecione um estabelecimento para ver suas estatísticas.</p>
+            )}
+        </div>
+    );
+};
+
+
 const SimulatedEstablishmentView: React.FC<{ establishment: Establishment }> = ({ establishment }) => {
     const { closeTable, viewAllCallsForTable, getTableSemaphoreStatus, attendOldestCallByType, getCallTypeSemaphoreStatus } = useAppContext();
 
@@ -320,12 +370,12 @@ const CALL_TYPE_INFO: { [key in CallType]: { label: string } } = {
 const CameraCapture: React.FC<{onCapture: (data: string) => void, onCancel: () => void}> = ({ onCapture, onCancel }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [stream, setStream] = useState<MediaStream|null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
 
     const startCamera = useCallback(async () => {
         try {
             const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            setStream(mediaStream);
+            streamRef.current = mediaStream;
             if (videoRef.current) {
                 videoRef.current.srcObject = mediaStream;
             }
@@ -339,9 +389,9 @@ const CameraCapture: React.FC<{onCapture: (data: string) => void, onCancel: () =
     useEffect(() => {
         startCamera();
         return () => {
-            stream?.getTracks().forEach(track => track.stop());
+            streamRef.current?.getTracks().forEach(track => track.stop());
         }
-    }, [startCamera, stream]);
+    }, [startCamera]);
 
     const handleCapture = () => {
         if (videoRef.current && canvasRef.current) {
@@ -351,7 +401,7 @@ const CameraCapture: React.FC<{onCapture: (data: string) => void, onCancel: () =
             context?.drawImage(videoRef.current, 0, 0, videoRef.current.videoWidth, videoRef.current.videoHeight);
             const dataUrl = canvasRef.current.toDataURL('image/jpeg');
             onCapture(dataUrl);
-            stream?.getTracks().forEach(track => track.stop());
+            streamRef.current?.getTracks().forEach(track => track.stop());
         }
     };
 

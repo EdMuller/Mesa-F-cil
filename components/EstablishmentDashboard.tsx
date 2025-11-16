@@ -3,18 +3,22 @@ import { useAppContext } from '../context/AppContext';
 import { Call, CallStatus, CallType, SemaphoreStatus, Table } from '../types';
 import Header from './Header';
 import SettingsIcon from './icons/SettingsIcon';
-import QrCodeIcon from './icons/QrCodeIcon';
+import ChartIcon from './icons/ChartIcon';
 import ShareIcon from './icons/ShareIcon';
+import UserIcon from './icons/UserIcon';
 import SettingsModal from './SettingsModal';
 import ShareModal from './ShareModal';
+import ProfileModal from './ProfileModal';
+import StatisticsModal from './StatisticsModal';
 import { APP_URL, CALL_TYPE_INFO } from '../constants';
 
 
 const EstablishmentDashboard: React.FC = () => {
   const { currentEstablishment, closeTable, viewAllCallsForTable, getTableSemaphoreStatus, logout } = useAppContext();
   const [isSettingsOpen, setSettingsOpen] = useState(false);
-  const [isQrOpen, setQrOpen] = useState(false);
   const [isShareAppOpen, setShareAppOpen] = useState(false);
+  const [isProfileOpen, setProfileOpen] = useState(false);
+  const [isStatisticsOpen, setStatisticsOpen] = useState(false);
 
   const tablesWithStatus = useMemo(() => {
     if (!currentEstablishment) return [];
@@ -70,26 +74,23 @@ const EstablishmentDashboard: React.FC = () => {
         </div>
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-2 flex justify-center items-center gap-4 sm:gap-6">
+      <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t border-gray-200 p-2 flex justify-around items-center">
           <button onClick={() => setSettingsOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
               <SettingsIcon /> <span className="text-xs sm:text-base">Configurações</span>
           </button>
-          <button onClick={() => setQrOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
-              <QrCodeIcon /> <span className="text-xs sm:text-base">QR Code da Mesa</span>
+          <button onClick={() => setStatisticsOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
+              <ChartIcon /> <span className="text-xs sm:text-base">Estatísticas</span>
           </button>
           <button onClick={() => setShareAppOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
-              <ShareIcon /> <span className="text-xs sm:text-base">Compartilhar App</span>
+              <ShareIcon /> <span className="text-xs sm:text-base">Compartilhar</span>
+          </button>
+          <button onClick={() => setProfileOpen(true)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-gray-600 hover:text-blue-600 transition-colors">
+              <UserIcon /> <span className="text-xs sm:text-base">Meu Perfil</span>
           </button>
       </div>
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setSettingsOpen(false)} />
-      <ShareModal 
-        isOpen={isQrOpen} 
-        onClose={() => setQrOpen(false)}
-        title="Compartilhe com seus clientes!"
-        text="Clientes podem escanear para acessar a página de chamados do seu estabelecimento."
-        url={`${APP_URL}/join?est=${encodeURIComponent(currentEstablishment.name)}`}
-      />
+      <StatisticsModal isOpen={isStatisticsOpen} onClose={() => setStatisticsOpen(false)} />
       <ShareModal 
         isOpen={isShareAppOpen} 
         onClose={() => setShareAppOpen(false)}
@@ -97,6 +98,7 @@ const EstablishmentDashboard: React.FC = () => {
         text="Convide outros estabelecimentos e clientes a usarem o aplicativo."
         url={APP_URL}
       />
+      <ProfileModal isOpen={isProfileOpen} onClose={() => setProfileOpen(false)} />
     </div>
   );
 };

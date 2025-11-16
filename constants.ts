@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   timeYellow: 180, // 3 min
   qtyGreen: 2,
   qtyYellow: 4,
+  totalTables: 20,
 };
 
 // This initial data is now used to seed the system if localStorage is empty.
@@ -33,4 +34,4 @@ export const SEED_ESTABLISHMENT = {
   settings: DEFAULT_SETTINGS,
 };
 
-export const APP_URL = "https://mesa-ativa-demo.com";
+export const APP_URL = "https://mesa-facil-drab.vercel.app/";

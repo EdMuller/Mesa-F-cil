@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Establishment, Table, Call, CallType, CallStatus, Settings, SemaphoreStatus, User, Role, CustomerProfile } from '../types';
+import { Establishment, Table, Call, CallType, CallStatus, Settings, SemaphoreStatus, User, Role, CustomerProfile, UserStatus, EventLogItem } from '../types';
 import { POLLING_INTERVAL, DEFAULT_SETTINGS, SEED_ESTABLISHMENT } from '../constants';
 
 const LOCAL_STORAGE_KEY = 'mesa-ativa-data';
@@ -31,7 +31,7 @@ export const useMockData = () => {
   useEffect(() => {
     try {
       const savedData = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-      const adminUser: User = { id: 'admin-root', email: 'eduardo_j_muller@yahoo.com.br', password: simpleHash('Eduardoj'), role: Role.ADMIN, name: 'Admin' };
+      const adminUser: User = { id: 'admin-root', email: 'eduardo_j_muller@yahoo.com.br', password: simpleHash('Eduardoj'), role: Role.ADMIN, name: 'Admin', status: UserStatus.SUBSCRIBER };
 
       if (savedData) {
         const parsed: AppData = JSON.parse(savedData);
@@ -44,23 +44,31 @@ export const useMockData = () => {
             loadedUsers.push(adminUser);
         }
         
+        // Ensure all users have a status
+        loadedUsers.forEach(u => {
+            if (!u.status) {
+                u.status = u.role === Role.ADMIN ? UserStatus.SUBSCRIBER : UserStatus.TESTING;
+            }
+        })
+
         setUsers(loadedUsers);
         // FIX: Reconstruct establishment object to avoid spread and ensure correct typing from parsed data.
-        setEstablishments(new Map(parsed.establishments?.map((e: Omit<Establishment, 'tables'> & { tables: [string, Table][] }) => [e.id, {
+        setEstablishments(new Map(parsed.establishments?.map((e: Omit<Establishment, 'tables' | 'eventLog'> & { tables: [string, Table][], eventLog: EventLogItem[] }) => [e.id, {
             id: e.id,
             ownerId: e.ownerId,
             name: e.name,
             phone: e.phone,
             photoUrl: e.photoUrl,
             phrase: e.phrase,
-            settings: e.settings,
-            tables: new Map(e.tables)
+            settings: { ...DEFAULT_SETTINGS, ...e.settings },
+            tables: new Map(e.tables),
+            eventLog: e.eventLog || []
         }]) ?? []));
         setCustomerProfiles(new Map(parsed.customerProfiles?.map(p => [p.userId, p]) || []));
       } else {
-         const establishmentUser: User = { id: SEED_ESTABLISHMENT.ownerId, email: 'admin@ze.com', password: simpleHash('1234'), role: Role.ESTABLISHMENT, name: 'Zé', establishmentId: SEED_ESTABLISHMENT.id };
+         const establishmentUser: User = { id: SEED_ESTABLISHMENT.ownerId, email: 'admin@ze.com', password: simpleHash('1234'), role: Role.ESTABLISHMENT, name: 'Zé', establishmentId: SEED_ESTABLISHMENT.id, status: UserStatus.TESTING };
          setUsers([adminUser, establishmentUser]);
-         setEstablishments(new Map([[SEED_ESTABLISHMENT.id, { ...SEED_ESTABLISHMENT, tables: new Map() }]]));
+         setEstablishments(new Map([[SEED_ESTABLISHMENT.id, { ...SEED_ESTABLISHMENT, tables: new Map(), eventLog: [] }]]));
       }
     } catch (error) {
       console.error("Failed to load from localStorage", error);
@@ -82,7 +90,8 @@ export const useMockData = () => {
           photoUrl: e.photoUrl,
           phrase: e.phrase,
           settings: e.settings,
-          tables: Array.from(e.tables.entries())
+          tables: Array.from(e.tables.entries()),
+          eventLog: e.eventLog,
         })),
         customerProfiles: Array.from(customerProfiles.values()),
       };
@@ -102,7 +111,7 @@ export const useMockData = () => {
     const newEstablishmentId = `est-${Date.now()}`;
     const newUserId = `user-${Date.now()}`;
     
-    const newUser: User = { id: newUserId, email, password: simpleHash(password), role: Role.ESTABLISHMENT, name, establishmentId: newEstablishmentId };
+    const newUser: User = { id: newUserId, email, password: simpleHash(password), role: Role.ESTABLISHMENT, name, establishmentId: newEstablishmentId, status: UserStatus.TESTING };
     
     const newEstablishment: Establishment = {
       id: newEstablishmentId,
@@ -113,6 +122,7 @@ export const useMockData = () => {
       phrase: "Seu novo slogan incrível aqui!",
       tables: new Map(),
       settings: DEFAULT_SETTINGS,
+      eventLog: [],
     };
 
     setUsers(prev => [...prev, newUser]);
@@ -130,7 +140,7 @@ export const useMockData = () => {
       throw new Error("Email já cadastrado.");
     }
     const newUserId = `user-${Date.now()}`;
-    const newUser: User = { id: newUserId, email, password: simpleHash(password), role: Role.CUSTOMER, name };
+    const newUser: User = { id: newUserId, email, password: simpleHash(password), role: Role.CUSTOMER, name, status: UserStatus.TESTING };
 
     const newProfile: CustomerProfile = { userId: newUserId, favoritedEstablishmentIds: [] };
 
@@ -179,6 +189,7 @@ export const useMockData = () => {
         phrase: establishment.phrase,
         settings: establishment.settings,
         tables: newTables,
+        eventLog: establishment.eventLog,
       };
       newEstablishments.set(establishmentId, newEstablishment);
       return newEstablishments;
@@ -206,6 +217,7 @@ export const useMockData = () => {
                 phrase: establishment.phrase,
                 settings: establishment.settings,
                 tables: newTables,
+                eventLog: establishment.eventLog,
               };
               newEstablishments.set(establishmentId, newEstablishment);
               return newEstablishments;
@@ -229,10 +241,11 @@ export const useMockData = () => {
         if (callsOfType.length > 0) {
             const callToCancel = callsOfType[0];
             const newTables = new Map<string, Table>(establishment.tables);
-            const newCalls = table.calls.map(c => c.id === callToCancel.id ? { ...c, status: CallStatus.CANCELED } : c);
-            const updatedCalls = newCalls.filter(c => c.status !== CallStatus.CANCELED); // Or keep them for history
-            const newTable: Table = { number: table.number, calls: updatedCalls };
+            const newCalls = table.calls.filter(c => c.id !== callToCancel.id);
+            const newTable: Table = { number: table.number, calls: newCalls };
             newTables.set(tableNumber, newTable);
+            const newEventLog: EventLogItem[] = [...(establishment.eventLog || []), { timestamp: Date.now(), type: 'CALL_CANCELED', callType }];
+
             // FIX: Reconstruct the establishment object instead of spreading to avoid type errors.
             const newEstablishment: Establishment = {
               id: establishment.id,
@@ -243,6 +256,7 @@ export const useMockData = () => {
               phrase: establishment.phrase,
               settings: establishment.settings,
               tables: newTables,
+              eventLog: newEventLog
             };
             newEstablishments.set(establishmentId, newEstablishment);
             return newEstablishments;
@@ -269,6 +283,8 @@ export const useMockData = () => {
             const newCalls = table.calls.filter(c => c.id !== callToAttend.id);
             const newTable: Table = { number: table.number, calls: newCalls };
             newTables.set(tableNumber, newTable);
+            const newEventLog: EventLogItem[] = [...(establishment.eventLog || []), { timestamp: Date.now(), type: 'CALL_ATTENDED', callType }];
+            
             // FIX: Reconstruct the establishment object instead of spreading to avoid type errors.
             const newEstablishment: Establishment = {
               id: establishment.id,
@@ -279,6 +295,7 @@ export const useMockData = () => {
               phrase: establishment.phrase,
               settings: establishment.settings,
               tables: newTables,
+              eventLog: newEventLog,
             };
             newEstablishments.set(establishmentId, newEstablishment);
             return newEstablishments;
@@ -301,6 +318,8 @@ export const useMockData = () => {
       if (!establishment) return prev;
       const newTables = new Map<string, Table>(establishment.tables);
       newTables.delete(tableNumber);
+      const newEventLog: EventLogItem[] = [...(establishment.eventLog || []), { timestamp: Date.now(), type: 'TABLE_CLOSED', tableNumber }];
+      
       // FIX: Reconstruct the establishment object instead of spreading to avoid type errors.
       const newEstablishment: Establishment = {
         id: establishment.id,
@@ -311,6 +330,7 @@ export const useMockData = () => {
         phrase: establishment.phrase,
         settings: establishment.settings,
         tables: newTables,
+        eventLog: newEventLog,
       };
       newEstablishments.set(establishmentId, newEstablishment);
       return newEstablishments;
@@ -332,6 +352,7 @@ export const useMockData = () => {
           phrase: establishment.phrase,
           settings: newSettings,
           tables: establishment.tables,
+          eventLog: establishment.eventLog,
         };
         newEstablishments.set(establishmentId, newEstablishment);
       }
@@ -414,6 +435,38 @@ export const useMockData = () => {
     return SemaphoreStatus.GREEN;
   }, []);
 
+  const updateUserStatus = useCallback((userId: string, newStatus: UserStatus) => {
+    setUsers(prevUsers => 
+        prevUsers.map(user => 
+            user.id === userId ? { ...user, status: newStatus } : user
+        )
+    );
+  }, []);
+
+  const deleteCurrentUser = useCallback(() => {
+    if (!currentUser) return;
+
+    setUsers(prev => prev.filter(u => u.id !== currentUser.id));
+
+    if (currentUser.role === Role.CUSTOMER) {
+        setCustomerProfiles(prev => {
+            const newProfiles = new Map(prev);
+            newProfiles.delete(currentUser.id);
+            return newProfiles;
+        });
+    }
+
+    if (currentUser.role === Role.ESTABLISHMENT && currentUser.establishmentId) {
+        setEstablishments(prev => {
+            const newEstablishments = new Map(prev);
+            newEstablishments.delete(currentUser.establishmentId!);
+            return newEstablishments;
+        });
+    }
+
+    logout();
+  }, [currentUser, logout]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setEstablishments(prev => new Map(prev));
@@ -456,5 +509,7 @@ export const useMockData = () => {
     getCallTypeSemaphoreStatus,
     getEstablishmentByPhone,
     favoriteEstablishment,
+    updateUserStatus,
+    deleteCurrentUser,
   };
 };

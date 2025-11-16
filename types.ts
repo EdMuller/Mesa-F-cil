@@ -24,6 +24,12 @@ export enum Role {
   ADMIN = 'ADMIN',
 }
 
+export enum UserStatus {
+  TESTING = 'TESTING',
+  SUBSCRIBER = 'SUBSCRIBER',
+  DISCONNECTED = 'DISCONNECTED',
+}
+
 
 export interface Call {
   id: string;
@@ -42,6 +48,7 @@ export interface Settings {
   timeYellow: number; // in seconds
   qtyGreen: number;
   qtyYellow: number;
+  totalTables: number;
 }
 
 export interface User {
@@ -50,6 +57,7 @@ export interface User {
   password: string; // In a real app, this would be hashed
   role: Role;
   name: string;
+  status: UserStatus;
   establishmentId?: string; // For establishment users
 }
 
@@ -58,6 +66,14 @@ export interface CustomerProfile {
   favoritedEstablishmentIds: string[];
 }
 
+export type EventLogType = 'CALL_ATTENDED' | 'CALL_CANCELED' | 'TABLE_CLOSED';
+
+export interface EventLogItem {
+    timestamp: number;
+    type: EventLogType;
+    callType?: CallType;
+    tableNumber?: string;
+}
 
 export interface Establishment {
   id: string; 
@@ -68,4 +84,5 @@ export interface Establishment {
   phrase: string;
   tables: Map<string, Table>;
   settings: Settings;
+  eventLog: EventLogItem[];
 }
