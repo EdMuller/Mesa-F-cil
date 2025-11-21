@@ -11,13 +11,21 @@
       body {
         font-family: 'Inter', sans-serif;
       }
+      .animate-pulse-bg {
+        animation: pulse-bg 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      @keyframes pulse-bg {
+        0%, 100% { background-color: #f9fafb; }
+        50% { background-color: #fee2e2; }
+      }
     </style>
   <script type="importmap">
 {
   "imports": {
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
   }
 }
 </script>

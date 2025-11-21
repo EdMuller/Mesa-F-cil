@@ -1,12 +1,15 @@
+
 import React, { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { Establishment } from '../types';
+import { Establishment, UserStatus } from '../types';
 import Header from './Header';
 import CustomerView from './CustomerView';
 import ShareIcon from './icons/ShareIcon';
 import UserIcon from './icons/UserIcon';
+import TrashIcon from './icons/TrashIcon';
 import ShareModal from './ShareModal';
 import ProfileModal from './ProfileModal';
+import VipModal from './VipModal';
 import { APP_URL } from '../constants';
 
 interface CustomerHomeProps {
@@ -17,11 +20,14 @@ interface CustomerHomeProps {
 const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGuestMode }) => {
   const { 
       currentUser,
+      users,
       logout, 
       establishments, 
       currentCustomerProfile, 
-      getEstablishmentByPhone, 
-      favoriteEstablishment 
+      getEstablishmentByPhone,
+      searchEstablishmentByPhone,
+      favoriteEstablishment,
+      unfavoriteEstablishment,
     } = useAppContext();
 
   const [selectedEstablishment, setSelectedEstablishment] = useState<Establishment | null>(null);
@@ -29,8 +35,11 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
   const [isEnteringTable, setIsEnteringTable] = useState(false);
   const [phoneToSearch, setPhoneToSearch] = useState('');
   const [error, setError] = useState('');
+  const [tableError, setTableError] = useState('');
   const [isShareAppOpen, setShareAppOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
+  const [isVipModalOpen, setVipModalOpen] = useState(false);
+  const [isLoadingSearch, setIsLoadingSearch] = useState(false);
 
   const favorited = useMemo(() => {
     if (!currentCustomerProfile) return [];
@@ -39,37 +48,85 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
         .filter((e): e is Establishment => e !== undefined);
   }, [currentCustomerProfile, establishments]);
   
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
       e.preventDefault();
       setError('');
-      const establishment = getEstablishmentByPhone(phoneToSearch);
-      if (!establishment) {
-          setError("Nenhum estabelecimento encontrado com este telefone.");
-          return;
-      }
+      setIsLoadingSearch(true);
       
-      if (isGuest) {
-        handleSelectEstablishment(establishment);
-      } else {
-        try {
-          favoriteEstablishment(currentUser!.id, establishment.id);
-          setPhoneToSearch('');
-        } catch (err: any) {
-          setError(err.message);
+      try {
+        // Try to get from cache or async search
+        let establishment = getEstablishmentByPhone(phoneToSearch);
+        if (!establishment && searchEstablishmentByPhone) {
+            // @ts-ignore
+            establishment = await searchEstablishmentByPhone(phoneToSearch);
         }
+        
+        if (!establishment) {
+            setError("Nenhum estabelecimento encontrado com este telefone.");
+            setIsLoadingSearch(false);
+            return;
+        }
+        
+        if (isGuest) {
+            handleSelectEstablishment(establishment);
+        } else {
+            try {
+            if (!currentUser) throw new Error("Usuário não logado.");
+            await favoriteEstablishment(currentUser!.id, establishment.id);
+            setPhoneToSearch('');
+            } catch (err: any) {
+            if (err.message.includes("máximo 3")) {
+                setVipModalOpen(true);
+            } else {
+                setError(err.message);
+            }
+            }
+        }
+      } catch (err) {
+          setError("Erro ao buscar estabelecimento.");
+      } finally {
+          setIsLoadingSearch(false);
       }
   };
 
   const handleSelectEstablishment = (establishment: Establishment) => {
+    setError('');
+    // With Supabase, users list might not be populated with everyone. 
+    // We rely on RLS or specific queries. 
+    // Assuming establishment object is valid if we have it.
     setSelectedEstablishment(establishment);
     setIsEnteringTable(true);
   };
   
   const handleTableSubmit = (e: React.FormEvent) => {
       e.preventDefault();
-      if(tableNumber.trim()) {
-          setIsEnteringTable(false); // This will hide the modal and show the CustomerView
+      setTableError('');
+
+      if (!tableNumber.trim()) {
+        setTableError("Por favor, informe o número da mesa.");
+        return;
       }
+
+      // Check if table is already in use in local state (snapshot)
+      // In real app, we might not want to block entry based on 'in use' if multiple people sit at table
+      // But preserving original logic:
+      const table = selectedEstablishment?.tables.get(tableNumber);
+      const hasActiveCalls = table?.calls.some(c => c.status === 'SENT' || c.status === 'VIEWED');
+
+      if (hasActiveCalls) {
+          setTableError("Esta mesa já tem chamados em andamento.");
+          // return; // Optional: block or allow
+      }
+      
+      const tableNum = parseInt(tableNumber, 10);
+      const totalTables = selectedEstablishment?.settings?.totalTables || 20;
+      
+      if (isNaN(tableNum) || tableNum < 1 || tableNum > totalTables) {
+           setTableError("Mesa Inexistente. Verifique o número e tente novamente.");
+           return;
+      }
+
+      setIsEnteringTable(false); // This will hide the modal and show the CustomerView
   }
 
   // If a table has been set, show the call view
@@ -80,8 +137,10 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                 onBack={() => {
                     setSelectedEstablishment(null);
                     setTableNumber('');
-                    if (isGuest) {
-                        setIsEnteringTable(true); // Go back to table entry if guest
+                    setTableError('');
+                    if (isGuest && selectedEstablishment) {
+                        // For guest, go back to table entry for the same establishment
+                        setIsEnteringTable(true); 
                     }
                 }}
              />
@@ -119,11 +178,11 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                     placeholder="Telefone do estabelecimento"
                     className="flex-grow p-2 border border-gray-300 rounded-md"
                 />
-                <button type="submit" className="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700">
-                    {isGuest ? 'Buscar' : 'Adicionar'}
+                <button disabled={isLoadingSearch} type="submit" className="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-blue-300">
+                    {isLoadingSearch ? 'Buscando...' : (isGuest ? 'Buscar' : 'Adicionar')}
                 </button>
             </div>
-            {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+            {error && <p className="text-red-500 text-sm mt-2 text-center">{error}</p>}
         </form>
         
         {/* Favorited list (only for logged-in users) */}
@@ -134,19 +193,40 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
             ) : (
                 <div className="space-y-4">
                     {favorited.map(est => (
-                        <div key={est.id} onClick={() => handleSelectEstablishment(est)} className="bg-white rounded-xl shadow-md p-4 flex items-center justify-between cursor-pointer hover:shadow-lg transition-shadow">
-                            <div className="flex items-center gap-4">
-                                <img src={est.photoUrl} alt={est.name} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
-                                <div>
-                                    <h3 className="text-xl font-bold text-blue-600">{est.name}</h3>
-                                    <p className="text-sm text-gray-500 italic">"{est.phrase}"</p>
+                        <div key={est.id} className="bg-white rounded-xl shadow-md p-4 flex items-center justify-between hover:shadow-lg transition-shadow">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation(); // prevent select establishment
+                                        if (window.confirm(`Tem certeza que deseja remover "${est.name}" dos seus favoritos?`)) {
+                                            unfavoriteEstablishment(currentUser!.id, est.id);
+                                        }
+                                    }}
+                                    className="p-2 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-100"
+                                    aria-label={`Remover ${est.name} dos favoritos`}
+                                >
+                                    <TrashIcon />
+                                </button>
+                                <div onClick={() => handleSelectEstablishment(est)} className="flex items-center gap-4 cursor-pointer">
+                                    <img src={est.photoUrl} alt={est.name} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
+                                    <div>
+                                        <h3 className="text-xl font-bold text-blue-600">{est.name}</h3>
+                                        <p className="text-sm text-gray-500 italic">"{est.phrase}"</p>
+                                    </div>
                                 </div>
                             </div>
-                            <span className="text-blue-500 font-semibold text-2xl">&rarr;</span>
+                            <div onClick={() => handleSelectEstablishment(est)} className="cursor-pointer">
+                                <span className="text-blue-500 font-semibold text-2xl">&rarr;</span>
+                            </div>
                         </div>
                     ))}
                 </div>
             )}
+             <div className="my-6 text-center">
+                <button onClick={() => setVipModalOpen(true)} className="font-medium text-blue-600 hover:text-blue-500 underline">
+                   Quer favoritar mais locais? Conheça o VIP!
+                </button>
+            </div>
             </>
         )}
 
@@ -169,8 +249,9 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                           autoFocus
                           required
                       />
+                      {tableError && <p className="text-red-500 text-sm mt-2">{tableError}</p>}
                       <div className="mt-6 flex gap-2">
-                         <button type="button" onClick={() => setIsEnteringTable(false)} className="w-full bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300">
+                         <button type="button" onClick={() => { setIsEnteringTable(false); setSelectedEstablishment(null); setTableNumber(''); setTableError(''); }} className="w-full bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300">
                             Cancelar
                         </button>
                         <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700">
@@ -200,6 +281,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                 url={APP_URL}
             />
             <ProfileModal isOpen={isProfileOpen} onClose={() => setProfileOpen(false)} />
+            <VipModal isOpen={isVipModalOpen} onClose={() => setVipModalOpen(false)} />
         </>
       )}
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Establishment, EventLogItem, CallType, Table } from '../types';
 import { CALL_TYPE_INFO } from '../constants';
@@ -58,8 +59,7 @@ const StatisticsView: React.FC<{ establishment: Establishment }> = ({ establishm
             const today = new Date();
             const dayOfWeek = today.getDay();
             const daysPassed = dayOfWeek === 0 ? 7 : dayOfWeek;
-            // FIX: Explicitly type 'sum' and 'count' as number to allow addition.
-            const totalCalls = Object.values(callsByType).reduce((sum: number, count: number) => sum + count, 0);
+            const totalCalls = (Object.values(callsByType) as number[]).reduce((sum, count) => sum + count, 0);
             average.customers = customersServed / daysPassed;
             average.calls = totalCalls / daysPassed;
         }

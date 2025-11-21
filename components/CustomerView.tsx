@@ -1,13 +1,13 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { CallType, CallStatus, Establishment, Call, SemaphoreStatus } from '../types';
+import { CallType, CallStatus, Establishment, SemaphoreStatus } from '../types';
 import { CALL_TYPE_INFO } from '../constants';
 import Header from './Header';
 
 // Selected Icons
-import PersonIcon from './icons/PersonIcon';
+import HandIcon from './icons/HandIcon';
 import MenuIcon from './icons/MenuIcon';
-import CreditCardIcon from './icons/CreditCardIcon';
+import ReceiptIcon from './icons/ReceiptIcon';
 
 
 interface CustomerViewProps {
@@ -61,9 +61,9 @@ const CallButton: React.FC<CallButtonProps> = ({ type, establishment, tableNumbe
     const { addCall, cancelOldestCallByType, getCallTypeSemaphoreStatus } = useAppContext();
 
     const icons: Record<CallType, React.ReactNode> = {
-        [CallType.WAITER]: <PersonIcon />,
+        [CallType.WAITER]: <HandIcon />,
         [CallType.MENU]: <MenuIcon />,
-        [CallType.BILL]: <CreditCardIcon />,
+        [CallType.BILL]: <ReceiptIcon />,
     };
 
     const table = establishment.tables.get(tableNumber);

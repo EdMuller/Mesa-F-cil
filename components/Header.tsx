@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Establishment } from '../types';
 
@@ -13,11 +14,30 @@ const Header: React.FC<HeaderProps> = ({ onBack, isEstablishment = false, establ
   const { currentEstablishment, currentUser } = useAppContext();
   const establishment = establishmentOverride ?? currentEstablishment;
 
+  // Estado local para controlar erro de imagem
+  const [imageError, setImageError] = useState(false);
+
+  // Resetar erro quando mudar o estabelecimento
+  useEffect(() => {
+      setImageError(false);
+  }, [establishment?.id]);
+
   const renderTitle = () => {
     if (establishment) {
       return (
         <div className="flex items-center gap-3">
-          <img src={establishment.photoUrl} alt={establishment.name} className="w-12 h-12 rounded-full object-cover shadow-sm" />
+          {!imageError && establishment.photoUrl ? (
+              <img 
+                src={establishment.photoUrl} 
+                alt={establishment.name} 
+                className="w-12 h-12 rounded-full object-cover shadow-sm"
+                onError={() => setImageError(true)}
+              />
+          ) : (
+              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shadow-sm font-bold">
+                  {establishment.name.substring(0, 2).toUpperCase()}
+              </div>
+          )}
           <div className="text-left">
             <h1 className="text-xl sm:text-2xl font-bold text-blue-600">{establishment.name}</h1>
             <p className="text-xs sm:text-sm text-gray-500 italic hidden sm:block">"{establishment.phrase}"</p>
