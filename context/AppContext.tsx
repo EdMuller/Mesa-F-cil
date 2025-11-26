@@ -3,7 +3,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useMockData } from '../hooks/useMockData';
 import ConfigModal from '../components/ConfigModal';
 
-type AppContextType = ReturnType<typeof useMockData>;
+// Estende o tipo do hook para incluir a função de reset manual
+type AppContextType = ReturnType<typeof useMockData> & {
+    resetConfig: () => void;
+};
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -18,11 +21,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const handleConfigSave = () => {
+      // Tenta recarregar, mas se falhar, o estado local resolve
       window.location.reload();
+      setShowConfig(false);
+  };
+
+  const resetConfig = () => {
+      localStorage.removeItem('supabase_url');
+      localStorage.removeItem('supabase_key');
+      setShowConfig(true); // Força a modal a aparecer via React State
+      try {
+        window.location.reload(); // Tenta recarregar por precaução
+      } catch (e) {
+        console.log("Reload bloqueado pelo ambiente, seguindo via estado.");
+      }
   };
 
   return (
-    <AppContext.Provider value={mockData}>
+    <AppContext.Provider value={{ ...mockData, resetConfig }}>
       {showConfig && <ConfigModal onSave={handleConfigSave} />}
       {!showConfig && mockData.isInitialized ? children : !showConfig ? <LoadingScreen /> : null}
     </AppContext.Provider>
@@ -38,6 +54,7 @@ export const useAppContext = () => {
 };
 
 const LoadingScreen = () => {
+    const { resetConfig } = useAppContext(); // Usa a função do contexto se disponível (aqui pode ser tricky pois o contexto não tá pronto, mas o botão externo resolve)
     const [showReset, setShowReset] = useState(false);
 
     useEffect(() => {

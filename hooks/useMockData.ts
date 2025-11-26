@@ -59,12 +59,25 @@ const sanitizePhone = (phone: string) => {
     return phone.replace(/\D/g, '');
 }
 
+// Helper para tratar erros comuns
+const handleCommonErrors = (err: any) => {
+    const msg = err.message || (typeof err === 'object' ? JSON.stringify(err) : "Erro desconhecido.");
+    
+    if (msg.includes("Invalid API key")) {
+         throw new Error("Chave de API Inválida. Por favor, redefina as configurações do servidor na tela inicial.");
+    }
+    if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        throw new Error("Erro de Conexão: Não foi possível contatar o servidor. Verifique sua internet ou se a URL do Supabase está correta. Tente 'Redefinir Configurações' na tela inicial.");
+    }
+    return msg;
+}
+
 // Função auxiliar para retry
 async function withRetry<T>(operation: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
     try {
         return await operation();
     } catch (err: any) {
-        // Se o erro for de API Key inválida, não adianta tentar de novo
+        // Se o erro for crítico de configuração, não adianta tentar de novo
         if (err.message && (err.message.includes("Invalid API key") || err.code === "PGRST301")) {
              throw new Error("Chave de API Inválida. Por favor, redefina as configurações do servidor na tela inicial.");
         }
@@ -275,17 +288,19 @@ export const useMockData = () => {
 
   const login = useCallback(async (email: string, password: string) => {
       if (!supabase) throw new Error("Supabase não configurado");
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-          if (error.message.includes("Invalid API key")) {
-               throw new Error("Chave de API do Supabase inválida. Verifique as configurações.");
+      try {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) {
+              throw error;
           }
-          throw error;
+          if (data.user) {
+              return { id: data.user.id, email, password: '', role: Role.CUSTOMER, name: '', status: UserStatus.TESTING } as User; 
+          }
+          throw new Error("Erro desconhecido no login");
+      } catch (err: any) {
+          const msg = handleCommonErrors(err);
+          throw new Error(msg);
       }
-      if (data.user) {
-          return { id: data.user.id, email, password: '', role: Role.CUSTOMER, name: '', status: UserStatus.TESTING } as User; 
-      }
-      throw new Error("Erro desconhecido no login");
   }, []);
 
   const loginAsAdminBackdoor = useCallback(async () => {
@@ -320,9 +335,7 @@ export const useMockData = () => {
         const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
         
         if (authError) {
-            if (authError.message?.includes("Invalid API key")) {
-                throw new Error("Chave de API Inválida. Por favor, clique em 'Redefinir Configurações do Servidor' na tela inicial.");
-            }
+            handleCommonErrors(authError); // Checks for Failed to fetch
 
             // Recovery logic
             const isAlreadyRegistered = 
@@ -364,18 +377,21 @@ export const useMockData = () => {
             }
         }
 
-        // 2. Insert Profile
-        const { error: profileError } = await withRetry<any>(() => supabase!.from('profiles').insert({
+        // Delay to allow policy propagation - INCREASED for safety
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // 2. Insert Profile (Upsert to handle recovery)
+        const { error: profileError } = await withRetry<any>(() => supabase!.from('profiles').upsert({
             id: userId,
             email,
             role: Role.ESTABLISHMENT,
             name,
             status: UserStatus.TESTING
-        }));
+        }).select());
         
         if (profileError) {
              if (profileError.message.includes("row-level security")) {
-                 throw new Error("Erro de Permissão: O banco de dados recusou a criação do perfil. Verifique se a opção 'Confirm Email' está DESATIVADA no Supabase.");
+                 throw new Error("Erro de Permissão (RLS): O banco recusou a criação do perfil. É OBRIGATÓRIO rodar o script de Policies no SQL Editor do Supabase.");
              }
              throw new Error(profileError.message || "Erro ao criar perfil.");
         }
@@ -395,11 +411,7 @@ export const useMockData = () => {
         return { id: userId, email, role: Role.ESTABLISHMENT, name, status: UserStatus.TESTING, establishmentId: estData.id } as User;
       } catch (err: any) {
           console.error("Erro no registro:", err);
-          const msg = err.message || (typeof err === 'object' ? JSON.stringify(err) : "Erro desconhecido.");
-          
-          if (msg.includes("Invalid API key")) {
-               throw new Error("Chave de API Inválida. Redefina as configurações na tela inicial.");
-          }
+          const msg = handleCommonErrors(err);
           throw new Error(msg);
       }
   }, []);
@@ -414,9 +426,7 @@ export const useMockData = () => {
         const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
         
         if (authError) {
-             if (authError.message?.includes("Invalid API key")) {
-                throw new Error("Chave de API Inválida. Redefina as configurações.");
-            }
+            handleCommonErrors(authError);
 
             const isAlreadyRegistered = 
                 authError.message?.toLowerCase().includes("already registered") || 
@@ -455,18 +465,21 @@ export const useMockData = () => {
             }
         }
         
-        // 2. Insert Profile
-        const { error: profileError } = await withRetry<any>(() => supabase!.from('profiles').insert({
+        // Delay to allow policy propagation - INCREASED for safety
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // 2. Insert Profile (Upsert)
+        const { error: profileError } = await withRetry<any>(() => supabase!.from('profiles').upsert({
             id: userId,
             email,
             role: Role.CUSTOMER,
             name,
             status: UserStatus.TESTING
-        }));
+        }).select());
         
         if (profileError) {
              if (profileError.message.includes("row-level security")) {
-                 throw new Error("Erro de Permissão: O banco de dados recusou a criação do perfil. Verifique se a opção 'Confirm Email' está DESATIVADA no Supabase.");
+                 throw new Error("Erro de Permissão (RLS): O banco recusou a criação do perfil. É OBRIGATÓRIO rodar o script de Policies no SQL Editor do Supabase.");
              }
              throw new Error(profileError.message || "Erro ao criar perfil.");
         }
@@ -483,11 +496,7 @@ export const useMockData = () => {
         return { id: userId, email, role: Role.CUSTOMER, name, status: UserStatus.TESTING } as User;
       } catch (err: any) {
            console.error("Erro no registro:", err);
-           const msg = err.message || (typeof err === 'object' ? JSON.stringify(err) : "Erro desconhecido.");
-
-           if (msg.includes("Invalid API key")) {
-               throw new Error("Chave de API Inválida. Redefina as configurações na tela inicial.");
-           }
+           const msg = handleCommonErrors(err);
            throw new Error(msg);
       }
   }, []);

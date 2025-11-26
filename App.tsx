@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from './context/AppContext';
 import EstablishmentDashboard from './components/EstablishmentDashboard';
@@ -84,13 +85,12 @@ interface RoleSelectionScreenProps {
 }
 
 const RoleSelectionScreen: React.FC<RoleSelectionScreenProps> = ({ onSelectRole, onGoToLogin }) => {
+  const { resetConfig } = useAppContext();
   const [showRegisterOptions, setShowRegisterOptions] = useState(false);
   
   const handleResetServer = () => {
       if(confirm("Deseja redefinir as configurações de conexão com o Supabase?")) {
-          localStorage.removeItem('supabase_url');
-          localStorage.removeItem('supabase_key');
-          window.location.reload();
+          resetConfig();
       }
   }
 
@@ -145,7 +145,6 @@ const RoleSelectionScreen: React.FC<RoleSelectionScreenProps> = ({ onSelectRole,
             <span>Acesso Rápido</span>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </button>
-            {/* Texto removido conforme solicitado */}
         </div>
 
         {/* Divisor */}
