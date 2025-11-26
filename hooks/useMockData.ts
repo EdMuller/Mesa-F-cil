@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Establishment, Table, Call, CallType, CallStatus, Settings, SemaphoreStatus, User, Role, CustomerProfile, UserStatus, EventLogItem } from '../types';
-import { DEFAULT_SETTINGS } from '../constants';
+import { DEFAULT_SETTINGS, SUPABASE_CONFIG } from '../constants';
 
 // --- Types for DB Tables ---
 interface DBProfile {
@@ -33,12 +33,20 @@ interface DBCall {
 }
 
 // --- Initialize Supabase ---
-let supabase: SupabaseClient | null = null;
+let supabase: any = null;
 
 const initSupabase = () => {
     try {
-        const url = localStorage.getItem('supabase_url');
-        const key = localStorage.getItem('supabase_key');
+        // Prioridade 1: Configuração fixa no código (constants.ts)
+        let url = SUPABASE_CONFIG.url;
+        let key = SUPABASE_CONFIG.anonKey;
+
+        // Prioridade 2: LocalStorage (caso não tenha fixo)
+        if (!url || !key) {
+            url = localStorage.getItem('supabase_url') || '';
+            key = localStorage.getItem('supabase_key') || '';
+        }
+
         if (url && key && !supabase) {
             // Basic URL validation to prevent crashes
             if (!url.startsWith('http')) throw new Error("Invalid URL");
@@ -46,7 +54,7 @@ const initSupabase = () => {
         }
     } catch (e) {
         console.error("Failed to init supabase", e);
-        // Clean bad config
+        // Clean bad config from local storage if strictly relying on it
         localStorage.removeItem('supabase_url');
         localStorage.removeItem('supabase_key');
         supabase = null;
@@ -64,10 +72,10 @@ const handleCommonErrors = (err: any) => {
     const msg = err.message || (typeof err === 'object' ? JSON.stringify(err) : "Erro desconhecido.");
     
     if (msg.includes("Invalid API key")) {
-         throw new Error("Chave de API Inválida. Por favor, redefina as configurações do servidor na tela inicial.");
+         throw new Error("Chave de API Inválida. Por favor, verifique o arquivo constants.ts ou redefina as configurações.");
     }
     if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
-        throw new Error("Erro de Conexão: Não foi possível contatar o servidor. Verifique sua internet ou se a URL do Supabase está correta. Tente 'Redefinir Configurações' na tela inicial.");
+        throw new Error("Erro de Conexão: Não foi possível contatar o servidor. Verifique sua internet ou se a URL do Supabase está correta.");
     }
     return msg;
 }
@@ -79,7 +87,7 @@ async function withRetry<T>(operation: () => Promise<T>, retries = 3, delay = 10
     } catch (err: any) {
         // Se o erro for crítico de configuração, não adianta tentar de novo
         if (err.message && (err.message.includes("Invalid API key") || err.code === "PGRST301")) {
-             throw new Error("Chave de API Inválida. Por favor, redefina as configurações do servidor na tela inicial.");
+             throw new Error("Chave de API Inválida.");
         }
 
         if (retries > 0) {
@@ -121,9 +129,12 @@ export const useMockData = () => {
           } catch (error: any) {
               console.warn("Session check failed or timed out:", error);
               if (error.message?.includes("Invalid API key")) {
-                  localStorage.removeItem('supabase_url');
-                  localStorage.removeItem('supabase_key');
-                  window.location.reload();
+                  // Only clear local storage if using local storage
+                  if (!SUPABASE_CONFIG.url) {
+                    localStorage.removeItem('supabase_url');
+                    localStorage.removeItem('supabase_key');
+                    window.location.reload();
+                  }
               }
           } finally {
               setIsInitialized(true);
@@ -132,7 +143,7 @@ export const useMockData = () => {
       
       checkSession();
       
-      const { data: authListener } = supabase?.auth.onAuthStateChange(async (event, session) => {
+      const { data: authListener } = supabase?.auth.onAuthStateChange(async (event: any, session: any) => {
           if (event === 'SIGNED_IN' && session?.user) {
               await fetchUserProfile(session.user.id, session.user.email!);
           } else if (event === 'SIGNED_OUT') {
@@ -142,7 +153,9 @@ export const useMockData = () => {
       }) || { data: { subscription: { unsubscribe: () => {} } } };
 
       return () => {
-          authListener.data.subscription.unsubscribe();
+          if (authListener && authListener.subscription) {
+              authListener.subscription.unsubscribe();
+          }
       }
   }, []);
 
@@ -253,22 +266,25 @@ export const useMockData = () => {
   const loadCustomerData = async (userId: string) => {
       if (!supabase) return;
       
-      const { data: details } = await supabase.from('customer_details').select('*').eq('user_id', userId).single();
-      const { data: favs } = await supabase.from('customer_favorites').select('establishment_id').eq('user_id', userId);
-      const favIds = favs?.map((f: any) => f.establishment_id) || [];
+      try {
+        const { data: details } = await supabase.from('customer_details').select('*').eq('user_id', userId).maybeSingle();
+        const { data: favs } = await supabase.from('customer_favorites').select('establishment_id').eq('user_id', userId);
+        const favIds = favs?.map((f: any) => f.establishment_id) || [];
 
-      for (const favId of favIds) {
-          await loadEstablishmentData(favId);
+        // Async load establishments to avoid blocking
+        favIds.forEach(id => loadEstablishmentData(id));
+
+        const profile: CustomerProfile = {
+            userId: userId,
+            favoritedEstablishmentIds: favIds,
+            phone: details?.phone,
+            cep: details?.cep
+        };
+
+        setCustomerProfiles(prev => new Map(prev).set(userId, profile));
+      } catch (e) {
+          console.error("Erro ao carregar dados do cliente", e);
       }
-
-      const profile: CustomerProfile = {
-          userId: userId,
-          favoritedEstablishmentIds: favIds,
-          phone: details?.phone,
-          cep: details?.cep
-      };
-
-      setCustomerProfiles(prev => new Map(prev).set(userId, profile));
   };
 
   // --- Realtime ---
@@ -325,62 +341,52 @@ export const useMockData = () => {
   }, []);
 
   const registerEstablishment = useCallback(async (name: string, phone: string, email: string, password: string, photoUrl: string | null, phrase: string) => {
-      if (!supabase) throw new Error("Erro de conexão: Supabase não iniciado. Tente redefinir as configurações.");
+      if (!supabase) throw new Error("Erro de conexão: Supabase não iniciado.");
       
       const cleanPhone = sanitizePhone(phone);
       let userId = '';
 
       try {
-        // 1. Auth Creation with Recovery Logic
+        // 1. Auth Creation
         const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
         
         if (authError) {
-            handleCommonErrors(authError); // Checks for Failed to fetch
-
-            // Recovery logic
+            handleCommonErrors(authError);
+            
             const isAlreadyRegistered = 
                 authError.message?.toLowerCase().includes("already registered") || 
                 authError.status === 422 || 
                 authError.code === 'user_already_exists';
 
             if (isAlreadyRegistered) {
-                    const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-                    
-                    if (loginError) {
-                        throw new Error("Este e-mail já está cadastrado, mas a senha informada está incorreta.");
-                    }
-
-                    if (loginData.user) {
-                        const { data: existingProfile } = await supabase.from('profiles').select('id').eq('id', loginData.user.id).single();
-                        if (existingProfile) {
-                            throw new Error("Esta conta já existe e está ativa. Por favor, faça login.");
-                        }
-                        // Zombie account recovery
-                        userId = loginData.user.id;
-                    } else {
-                        throw new Error("Este e-mail já está cadastrado. Tente fazer login.");
-                    }
+                // Tenta logar e ver se o perfil existe
+                const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+                
+                if (loginError) throw new Error("Este e-mail já está cadastrado, mas a senha informada está incorreta.");
+                
+                if (loginData.user) {
+                    const { data: existingProfile } = await supabase.from('profiles').select('id').eq('id', loginData.user.id).single();
+                    if (existingProfile) throw new Error("Esta conta já existe e está ativa. Por favor, faça login.");
+                    userId = loginData.user.id; // Zombie account recovery
+                }
             } else {
-                throw new Error(authError.message || "Erro desconhecido na autenticação.");
+                 throw new Error(authError.message);
             }
         } else {
             if (!authData.user) throw new Error("Falha ao criar usuário Auth.");
             userId = authData.user.id;
-            
-            // CRITICAL FIX: If email confirmation is ON, session is null. 
-            // We try to login immediately. If it fails, we know confirmation is needed.
+
             if (!authData.session) {
                 const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
                 if (loginError || !loginData.session) {
-                    throw new Error("Sua conta foi criada, mas o login automático falhou. Por favor, vá no painel do Supabase > Authentication > Providers > Email e DESATIVE a opção 'Confirm Email'.");
+                    throw new Error("Sua conta foi criada, mas o login automático falhou. Desative 'Confirm Email' no Supabase.");
                 }
             }
         }
 
-        // Delay to allow policy propagation - INCREASED for safety
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 2. Insert Profile (Upsert to handle recovery)
+        // 2. Insert Profile
         const { error: profileError } = await withRetry<any>(() => supabase!.from('profiles').upsert({
             id: userId,
             email,
@@ -391,9 +397,9 @@ export const useMockData = () => {
         
         if (profileError) {
              if (profileError.message.includes("row-level security")) {
-                 throw new Error("Erro de Permissão (RLS): O banco recusou a criação do perfil. É OBRIGATÓRIO rodar o script de Policies no SQL Editor do Supabase.");
+                 throw new Error("Erro de Permissão (RLS). Rode o script de Policies no Supabase.");
              }
-             throw new Error(profileError.message || "Erro ao criar perfil.");
+             throw new Error(profileError.message);
         }
 
         // 3. Insert Establishment
@@ -406,7 +412,7 @@ export const useMockData = () => {
             settings: DEFAULT_SETTINGS
         }).select().single());
         
-        if (estError) throw new Error(estError.message || "Erro ao criar estabelecimento.");
+        if (estError) throw new Error(estError.message);
 
         return { id: userId, email, role: Role.ESTABLISHMENT, name, status: UserStatus.TESTING, establishmentId: estData.id } as User;
       } catch (err: any) {
@@ -422,53 +428,41 @@ export const useMockData = () => {
       let userId = '';
 
       try {
-        // 1. Auth Creation
         const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
         
         if (authError) {
             handleCommonErrors(authError);
-
-            const isAlreadyRegistered = 
+             const isAlreadyRegistered = 
                 authError.message?.toLowerCase().includes("already registered") || 
                 authError.status === 422 || 
                 authError.code === 'user_already_exists';
 
             if (isAlreadyRegistered) {
-                    const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
-                    if (loginError) {
-                        throw new Error("Este e-mail já está cadastrado, mas a senha informada está incorreta.");
-                    }
-                    
-                    if (loginData.user) {
-                        const { data: existingProfile } = await supabase.from('profiles').select('id').eq('id', loginData.user.id).single();
-                        if (existingProfile) {
-                            throw new Error("Esta conta já existe. Por favor, faça login.");
-                        }
-                        userId = loginData.user.id;
-                    } else {
-                        throw new Error("Este e-mail já está cadastrado.");
-                    }
+                const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+                if (loginError) throw new Error("Este e-mail já está cadastrado, mas a senha informada está incorreta.");
+                
+                if (loginData.user) {
+                     const { data: existingProfile } = await supabase.from('profiles').select('id').eq('id', loginData.user.id).single();
+                     if (existingProfile) throw new Error("Esta conta já existe. Por favor, faça login.");
+                     userId = loginData.user.id;
+                }
             } else {
-                throw new Error(authError.message || "Erro desconhecido na autenticação.");
+                throw new Error(authError.message);
             }
         } else {
             if (!authData.user) throw new Error("Falha ao criar usuário Auth.");
             userId = authData.user.id;
             
-             // CRITICAL FIX: If email confirmation is ON, session is null. 
-            // We try to login immediately. If it fails, we know confirmation is needed.
             if (!authData.session) {
                 const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
                 if (loginError || !loginData.session) {
-                    throw new Error("Sua conta foi criada, mas o login automático falhou. Por favor, vá no painel do Supabase > Authentication > Providers > Email e DESATIVE a opção 'Confirm Email'.");
+                    throw new Error("Sua conta foi criada, mas o login automático falhou. Desative 'Confirm Email' no Supabase.");
                 }
             }
         }
         
-        // Delay to allow policy propagation - INCREASED for safety
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 2. Insert Profile (Upsert)
         const { error: profileError } = await withRetry<any>(() => supabase!.from('profiles').upsert({
             id: userId,
             email,
@@ -479,12 +473,11 @@ export const useMockData = () => {
         
         if (profileError) {
              if (profileError.message.includes("row-level security")) {
-                 throw new Error("Erro de Permissão (RLS): O banco recusou a criação do perfil. É OBRIGATÓRIO rodar o script de Policies no SQL Editor do Supabase.");
+                 throw new Error("Erro de Permissão (RLS). Rode o script de Policies no Supabase.");
              }
-             throw new Error(profileError.message || "Erro ao criar perfil.");
+             throw new Error(profileError.message);
         }
 
-        // 3. Insert Details
         if (phone || cep) {
             await withRetry(() => supabase!.from('customer_details').insert({
                 user_id: userId,
@@ -601,7 +594,7 @@ export const useMockData = () => {
       if (!supabase) return null;
       const cleanSearch = sanitizePhone(phone);
       // Direct retry here
-      const { data } = await withRetry<any>(() => supabase!.from('establishments').select('*').eq('phone', cleanSearch).single());
+      const { data } = await withRetry<any>(() => supabase!.from('establishments').select('*').eq('phone', cleanSearch).maybeSingle());
       if (data) {
           await loadEstablishmentData(data.id);
           // Return the full object from map, ensuring we have latest calls
@@ -615,7 +608,7 @@ export const useMockData = () => {
       
       const { data: profile } = await supabase.from('customer_favorites').select('id').eq('user_id', userId);
       if (profile && profile.length >= 3) {
-           throw new Error("Você pode ter no máximo 3 estabelecimentos favoritos.");
+           throw new Error("Você atingiu o máximo de 3 estabelecimentos favoritos.");
       }
 
       const { error } = await withRetry<any>(() => supabase!.from('customer_favorites').insert({ user_id: userId, establishment_id: establishmentId }));
@@ -640,7 +633,6 @@ export const useMockData = () => {
 
   const deleteCurrentUser = useCallback(async () => {
       if (!supabase || !currentUser) return;
-      // Apaga o perfil. O 'cascade' no banco de dados deve limpar favoritos, estabelecimentos e chamados
       await withRetry(() => supabase!.from('profiles').delete().eq('id', currentUser.id));
       await logout();
   }, [currentUser, logout]);
@@ -708,6 +700,18 @@ export const useMockData = () => {
       return null;
   }, [currentUser, customerProfiles]);
 
+  const checkTableAvailability = async (establishmentId: string, tableNumber: string): Promise<boolean> => {
+      if (!supabase) return false;
+      const { data } = await supabase.from('calls')
+        .select('id')
+        .eq('establishment_id', establishmentId)
+        .eq('table_number', tableNumber)
+        .in('status', ['SENT', 'VIEWED'])
+        .limit(1);
+      
+      return !data || data.length === 0;
+  }
+
   return { 
     isInitialized,
     users,
@@ -734,5 +738,7 @@ export const useMockData = () => {
     unfavoriteEstablishment,
     updateUserStatus,
     deleteCurrentUser,
+    subscribeToEstablishmentCalls,
+    checkTableAvailability,
   };
 };

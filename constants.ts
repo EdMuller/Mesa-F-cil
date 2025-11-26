@@ -1,3 +1,4 @@
+
 import { Settings, CallType, CallStatus } from './types';
 
 export const POLLING_INTERVAL = 20000; // 20 seconds
@@ -35,3 +36,10 @@ export const SEED_ESTABLISHMENT = {
 };
 
 export const APP_URL = "https://mesa-facil-drab.vercel.app/";
+
+// --- CONFIGURAÇÃO DO SERVIDOR ---
+// Preencha aqui para que o aplicativo funcione sem pedir login de configuração.
+export const SUPABASE_CONFIG = {
+    url: "https://romsbbyupakyqssotygp.supabase.co", // Cole sua URL do Supabase aqui (dentro das aspas)
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvbXNiYnl1cGFreXFzc290eWdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMzE4OTgsImV4cCI6MjA3OTcwNzg5OH0.qe1QIlNfmjrVtYtb5A65aCKnigWiepSWOyGoiR6SxNo" // Cole sua Anon Key do Supabase aqui (dentro das aspas)
+};

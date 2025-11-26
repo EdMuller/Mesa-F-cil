@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 
@@ -12,13 +13,22 @@ const Login: React.FC<LoginProps> = ({ onGoToRegister, onBack }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         try {
-            login(email, password);
+            await login(email, password);
         } catch (err: any) {
-            setError(err.message || 'Falha no login.');
+            console.error(err);
+            
+            // Tratamento de erro específico para login inválido
+            if (err.message.includes("Invalid login credentials") || err.message.includes("Falha no login")) {
+                setError("Usuário não encontrado ou senha incorreta.");
+                setEmail('');
+                setPassword('');
+            } else {
+                setError(err.message || 'Falha no login.');
+            }
         }
     }
 
@@ -32,7 +42,7 @@ const Login: React.FC<LoginProps> = ({ onGoToRegister, onBack }) => {
                 <p className="text-lg text-slate-600 mb-8">Bem-vindo(a) de volta!</p>
                 
                 <form onSubmit={handleSubmit} className="w-full bg-white p-8 rounded-2xl shadow-lg text-left space-y-4">
-                     {error && <p className="bg-red-100 text-red-700 p-3 rounded-md text-center">{error}</p>}
+                     {error && <p className="bg-red-100 text-red-700 p-3 rounded-md text-center text-sm">{error}</p>}
                     <div>
                         <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
                         <input
@@ -59,12 +69,12 @@ const Login: React.FC<LoginProps> = ({ onGoToRegister, onBack }) => {
                         Entrar
                     </button>
                 </form>
-                <p className="mt-8">
-                    Não tem uma conta?{' '}
-                    <button onClick={onGoToRegister} className="font-medium text-blue-600 hover:text-blue-500">
+                <div className="mt-8">
+                    <p className="text-gray-600">Não tem uma conta?</p>
+                    <button onClick={onGoToRegister} className="mt-2 w-full font-medium text-blue-600 hover:text-white border border-blue-600 hover:bg-blue-600 py-2 rounded-lg transition-colors">
                        Cadastre-se
                     </button>
-                </p>
+                </div>
             </div>
         </div>
     );

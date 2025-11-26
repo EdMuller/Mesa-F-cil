@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useMockData } from '../hooks/useMockData';
 import ConfigModal from '../components/ConfigModal';
+import { SUPABASE_CONFIG } from '../constants';
 
 // Estende o tipo do hook para incluir a função de reset manual
 type AppContextType = ReturnType<typeof useMockData> & {
@@ -13,25 +14,35 @@ const AppContext = createContext<AppContextType | null>(null);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const mockData = useMockData();
   
-  // Inicializa o estado verificando o localStorage imediatamente
+  // Inicializa o estado verificando o localStorage ou Configuração Fixa
   const [showConfig, setShowConfig] = useState(() => {
+      // Se as credenciais estiverem no arquivo constants.ts, não mostra o modal
+      if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey) {
+          return false;
+      }
+
       const url = localStorage.getItem('supabase_url');
       const key = localStorage.getItem('supabase_key');
       return !url || !key;
   });
 
   const handleConfigSave = () => {
-      // Tenta recarregar, mas se falhar, o estado local resolve
       window.location.reload();
       setShowConfig(false);
   };
 
   const resetConfig = () => {
+      // Se estiver usando configuração fixa, não permite resetar localStorage
+      if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey) {
+          alert("As configurações do servidor estão definidas pelo administrador e não podem ser alteradas.");
+          return;
+      }
+
       localStorage.removeItem('supabase_url');
       localStorage.removeItem('supabase_key');
       setShowConfig(true); // Força a modal a aparecer via React State
       try {
-        window.location.reload(); // Tenta recarregar por precaução
+        window.location.reload(); 
       } catch (e) {
         console.log("Reload bloqueado pelo ambiente, seguindo via estado.");
       }
@@ -54,7 +65,7 @@ export const useAppContext = () => {
 };
 
 const LoadingScreen = () => {
-    const { resetConfig } = useAppContext(); // Usa a função do contexto se disponível (aqui pode ser tricky pois o contexto não tá pronto, mas o botão externo resolve)
+    const { resetConfig } = useAppContext(); 
     const [showReset, setShowReset] = useState(false);
 
     useEffect(() => {
@@ -79,7 +90,7 @@ const LoadingScreen = () => {
                 <p className="text-xs text-gray-400">Verificando sessão segura</p>
             </div>
 
-            {showReset && (
+            {showReset && !SUPABASE_CONFIG.url && (
                 <div className="mt-4 animate-fade-in">
                     <p className="text-sm text-red-500 mb-2">Está demorando mais que o normal?</p>
                     <button 

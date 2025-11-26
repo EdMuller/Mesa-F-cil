@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Role, User, Establishment, CallType, SemaphoreStatus, Table, CallStatus, Call, UserStatus } from '../types';
@@ -53,7 +54,7 @@ const UserManagementSection = () => {
         try {
             let newUser;
             if (formType === Role.ESTABLISHMENT) {
-                newUser = registerEstablishment(formData.name, formData.phone, formData.email, formData.password, formData.photo);
+                newUser = registerEstablishment(formData.name, formData.phone, formData.email, formData.password, formData.photo, formData.phrase || '');
             } else {
                 newUser = registerCustomer(formData.name, formData.email, formData.password);
             }
@@ -110,18 +111,19 @@ const RegistrationForm: React.FC<{ type: Role.CUSTOMER | Role.ESTABLISHMENT, onS
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
     const [phone, setPhone] = useState(''); // Establishment only
+    const [phrase, setPhrase] = useState(''); // Establishment only
     const [photo, setPhoto] = useState<string | null>(null);
     const [showCamera, setShowCamera] = useState(false);
 
     const isEstablishment = type === Role.ESTABLISHMENT;
 
     const resetForm = () => {
-        setEmail(''); setPassword(''); setName(''); setPhone(''); setPhoto(null);
+        setEmail(''); setPassword(''); setName(''); setPhone(''); setPhoto(null); setPhrase('');
     }
     
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const success = await onSubmit({ name, phone, email, password, photo });
+        const success = await onSubmit({ name, phone, email, password, photo, phrase });
         if(success) resetForm();
     };
 
@@ -153,6 +155,10 @@ const RegistrationForm: React.FC<{ type: Role.CUSTOMER | Role.ESTABLISHMENT, onS
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Telefone de Contato</label>
                         <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1 w-full p-2 border border-gray-300 rounded-md" required />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Frase de Efeito</label>
+                        <input type="text" value={phrase} onChange={(e) => setPhrase(e.target.value)} className="mt-1 w-full p-2 border border-gray-300 rounded-md" placeholder="Ex: A melhor do bairro" />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Foto</label>
