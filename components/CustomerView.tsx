@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { CallType, CallStatus, Establishment, SemaphoreStatus } from '../types';
 import { CALL_TYPE_INFO } from '../constants';
@@ -18,15 +18,41 @@ interface CustomerViewProps {
 }
 
 const CustomerView: React.FC<CustomerViewProps> = ({ establishment: initialEstablishment, tableNumber, onBack }) => {
-  const { establishments } = useAppContext();
+  const { establishments, subscribeToEstablishmentCalls } = useAppContext();
   
   // O PULO DO GATO:
   // Em vez de usar o 'initialEstablishment' (que é estático), buscamos a versão atualizada
-  // diretamente do contexto global. Assim, quando o Realtime atualiza o contexto, 
-  // esta tela atualiza sozinha e os botões mudam de cor.
+  // diretamente do contexto global.
   const establishment = establishments.get(initialEstablishment.id) || initialEstablishment;
 
+  // SUBSCRIPTION VITAL: O Cliente precisa ouvir o estabelecimento para saber quando
+  // o garçom marcou o chamado como "Atendido" ou "Visualizado".
+  useEffect(() => {
+      const unsubscribe = subscribeToEstablishmentCalls(establishment.id);
+      return () => {
+          unsubscribe && unsubscribe();
+      }
+  }, [establishment.id, subscribeToEstablishmentCalls]);
+
   const backText = establishment.ownerId ? "Voltar" : "Sair";
+
+  // Se o estabelecimento fechar enquanto o cliente está na mesa
+  if (!establishment.isOpen) {
+      return (
+          <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+              <div className="bg-white p-6 rounded-lg shadow-lg text-center max-w-sm">
+                  <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </div>
+                  <h2 className="text-xl font-bold mb-2 text-gray-800">Estabelecimento Fechou</h2>
+                  <p className="text-gray-600 mb-6">O estabelecimento encerrou as atividades ou desconectou o sistema.</p>
+                  <button onClick={onBack} className="w-full bg-blue-600 text-white font-bold py-2 rounded-md hover:bg-blue-700">
+                      Sair da Mesa
+                  </button>
+              </div>
+          </div>
+      )
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 pb-20">

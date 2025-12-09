@@ -42,21 +42,37 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
   const [isVipModalOpen, setVipModalOpen] = useState(false);
   const [isLoadingSearch, setIsLoadingSearch] = useState(false);
 
+  // 1. Efeito para conectar aos favoritos e ouvir mudanças de status em tempo real
   useEffect(() => {
-      if (selectedEstablishment) {
-          const unsubscribe = subscribeToEstablishmentCalls(selectedEstablishment.id);
-          return () => {
-              unsubscribe && unsubscribe();
-          };
+      const unsubs: (() => void)[] = [];
+      
+      // Se tiver perfil de cliente e favoritos, subscreve a todos
+      if (currentCustomerProfile?.favoritedEstablishmentIds) {
+          currentCustomerProfile.favoritedEstablishmentIds.forEach(id => {
+              // A função subscribeToEstablishmentCalls atualiza o 'establishments' map quando algo muda
+              const unsub = subscribeToEstablishmentCalls(id);
+              unsubs.push(unsub);
+          });
       }
-  }, [selectedEstablishment?.id, subscribeToEstablishmentCalls]);
+      
+      // Se for convidado e selecionou um estabelecimento temporário (não salvo no perfil), ouve ele também
+      if (isGuest && selectedEstablishment) {
+          const unsub = subscribeToEstablishmentCalls(selectedEstablishment.id);
+          unsubs.push(unsub);
+      }
+
+      return () => {
+          unsubs.forEach(u => u());
+      };
+  }, [currentCustomerProfile?.favoritedEstablishmentIds, selectedEstablishment?.id, isGuest, subscribeToEstablishmentCalls]);
+
 
   const favorited = useMemo(() => {
     if (!currentCustomerProfile) return [];
     return currentCustomerProfile.favoritedEstablishmentIds
         .map(id => establishments.get(id))
         .filter((e): e is Establishment => e !== undefined);
-  }, [currentCustomerProfile, establishments]);
+  }, [currentCustomerProfile, establishments]); // establishments muda com o Realtime
   
   const handleSearch = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -77,16 +93,20 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
         }
         
         if (isGuest) {
+            // Convidados podem selecionar fechado, mas serão barrados ao tentar entrar na mesa
             handleSelectEstablishment(establishment);
         } else {
             try {
                 if (!currentUser) throw new Error("Usuário não logado.");
                 await favoriteEstablishment(currentUser!.id, establishment.id);
                 setPhoneToSearch('');
+                // Verifica status mas PERMITE adicionar
                 if(!establishment.isOpen) {
-                    setStatusMessage(`Adicionado (Fechado).`);
-                    setTimeout(() => setStatusMessage(''), 3000);
+                    setStatusMessage(`Adicionado aos favoritos (Fechado).`);
+                } else {
+                    setStatusMessage("Adicionado com sucesso!");
                 }
+                setTimeout(() => setStatusMessage(''), 3000);
             } catch (err: any) {
                 if (err.message && err.message.includes("máximo 3")) {
                     setVipModalOpen(true);
@@ -106,14 +126,17 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
   const handleSelectEstablishment = (establishment: Establishment) => {
     setError('');
     setStatusMessage('');
+    
+    // Atualiza a seleção local com os dados mais frescos do Contexto
+    const freshData = establishments.get(establishment.id) || establishment;
+    setSelectedEstablishment(freshData);
 
-    if (!establishment.isOpen) {
-        setStatusMessage(`"${establishment.name}" está fechado.`);
+    // Se estiver fechado, avisa, mas permite a seleção (para ver detalhes se quisesse, mas bloqueia mesa depois)
+    if (!freshData.isOpen) {
+        setStatusMessage(`"${freshData.name}" está fechado.`);
         setTimeout(() => setStatusMessage(''), 3000);
-        return;
     }
-
-    setSelectedEstablishment(establishment);
+    
     setIsEnteringTable(true);
   };
   
@@ -122,33 +145,41 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
       setTableError('');
 
       if (!selectedEstablishment) return;
-      if(!selectedEstablishment.isOpen) {
-          setTableError("Estabelecimento fechou.");
+      
+      // Busca dados frescos antes de validar entrada
+      const freshEstablishment = establishments.get(selectedEstablishment.id) || selectedEstablishment;
+
+      if(!freshEstablishment.isOpen) {
+          setTableError("Estabelecimento fechado no momento.");
           return;
       }
+      
       if (!tableNumber.trim()) {
         setTableError("Informe a mesa.");
         return;
       }
 
-      const table = selectedEstablishment?.tables.get(tableNumber);
+      // Verifica se a mesa já está em uso localmente (cache)
+      const table = freshEstablishment.tables.get(tableNumber);
       const hasActiveCalls = table?.calls.some(c => c.status === 'SENT' || c.status === 'VIEWED');
       if (hasActiveCalls) {
-          setTableError("Mesa em uso.");
-          // return; 
+          // Opcional: Bloquear ou Apenas Avisar
+          // setTableError("Mesa parece estar ocupada.");
       }
       
       const tableNum = parseInt(tableNumber, 10);
-      const totalTables = selectedEstablishment?.settings?.totalTables || 20;
+      const totalTables = freshEstablishment.settings?.totalTables || 20;
       
       if (isNaN(tableNum) || tableNum < 1 || tableNum > totalTables) {
            setTableError("Mesa Inexistente.");
            return;
       }
 
+      // Sucesso
       setIsEnteringTable(false);
   }
 
+  // Se selecionou mesa válida e estabelecimento aberto
   if (selectedEstablishment && tableNumber && !isEnteringTable) {
       return <CustomerView 
                 establishment={selectedEstablishment} 
@@ -185,9 +216,9 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
             </div>
         )}
 
-        {/* LISTA DE FAVORITOS (Vem primeiro agora) */}
+        {/* LISTA DE FAVORITOS */}
         {!isGuest && (
-            <div className="mb-3">
+            <div className="mb-3 animate-fade-in">
                 {favorited.length === 0 ? (
                     <div className="bg-white rounded-lg border border-dashed border-gray-300 p-4 text-center">
                         <p className="text-gray-400 text-xs">Lista de favoritos vazia.</p>
@@ -198,18 +229,27 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                             <div 
                                 key={est.id} 
                                 onClick={() => handleSelectEstablishment(est)}
-                                className="bg-white rounded-lg shadow-sm border border-gray-200 p-2 hover:shadow-md transition-all cursor-pointer"
+                                className={`bg-white rounded-lg shadow-sm border p-2 transition-all cursor-pointer relative overflow-hidden group ${!est.isOpen ? 'opacity-70 border-gray-200' : 'hover:shadow-md border-gray-200 hover:border-blue-200'}`}
                             >
                                 <div className="flex gap-2 items-center">
-                                    <img src={est.photoUrl} alt={est.name} className="w-14 h-14 rounded-lg object-cover bg-gray-200 flex-shrink-0" />
+                                    <div className="relative">
+                                        <img src={est.photoUrl} alt={est.name} className="w-14 h-14 rounded-lg object-cover bg-gray-200 flex-shrink-0" />
+                                        {!est.isOpen && (
+                                            <div className="absolute inset-0 bg-gray-900 bg-opacity-40 rounded-lg flex items-center justify-center">
+                                                <span className="text-[8px] text-white font-bold bg-black bg-opacity-50 px-1 rounded">FECHADO</span>
+                                            </div>
+                                        )}
+                                    </div>
 
                                     <div className="flex-grow overflow-hidden min-w-0">
                                         <h3 className="text-sm font-bold text-blue-600 truncate leading-tight">{est.name}</h3>
                                         <p className="text-[10px] text-gray-500 italic truncate leading-tight mt-0.5">"{est.phrase}"</p>
                                         
                                         <div className="flex items-center justify-between mt-1">
-                                            <span className={`text-[9px] px-1.5 py-px rounded font-bold uppercase tracking-wide ${est.isOpen ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                                {est.isOpen ? 'Aberto' : 'Fechado'}
+                                            {/* BADGE DE STATUS REALTIME */}
+                                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wide flex items-center gap-1 ${est.isOpen ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                <span className={`w-1.5 h-1.5 rounded-full ${est.isOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                                {est.isOpen ? 'Aberto agora' : 'Fechado'}
                                             </span>
 
                                             <button
@@ -233,7 +273,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
             </div>
         )}
 
-        {/* SEARCH FORM (Agora embaixo dos favoritos) */}
+        {/* SEARCH FORM */}
         <form onSubmit={handleSearch} className="mb-2 p-2 bg-white rounded-lg shadow-sm border border-gray-200">
             <h2 className="font-bold mb-1.5 text-[10px] uppercase text-gray-500 tracking-wider">
                 {isGuest ? 'Buscar Estabelecimento' : 'Adicionar Novo Favorito'}
@@ -255,10 +295,9 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                 </button>
             </div>
             {error && <p className="text-red-500 text-xs mt-1 text-center">{error}</p>}
-            {statusMessage && <p className="text-blue-600 text-xs font-bold mt-1 text-center animate-pulse">{statusMessage}</p>}
+            {statusMessage && <p className="text-blue-600 text-xs font-bold mt-1 text-center">{statusMessage}</p>}
         </form>
 
-        {/* VIP BANNER (Compacto) */}
         {!isGuest && (
              <div className="mt-2 text-center bg-blue-50 py-2 px-3 rounded-lg border border-blue-100 flex items-center justify-between">
                 <span className="text-[10px] text-gray-600">Quer mais favoritos?</span>
@@ -270,36 +309,50 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
 
       </main>
 
+      {/* MODAL DE ENTRADA NA MESA */}
       {isEnteringTable && selectedEstablishment && (
           <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 animate-fade-in">
-              <div className="bg-white rounded-lg shadow-xl w-full max-w-xs p-5 text-center">
-                  <h2 className="text-lg font-bold mb-1 text-blue-800">{selectedEstablishment.name}</h2>
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-xs p-5 text-center relative">
                   
-                  <form onSubmit={handleTableSubmit}>
-                      <label htmlFor="tableNumber" className="block text-sm font-medium text-gray-600 my-3">Qual o número da mesa?</label>
-                      <input
-                          id="tableNumber"
-                          type="number"
-                          value={tableNumber}
-                          onChange={(e) => setTableNumber(e.target.value)}
-                          className="w-full text-center text-3xl font-bold p-3 border-2 border-gray-200 rounded-lg focus:ring-green-500 focus:border-green-500 text-gray-800"
-                          autoFocus
-                          required
-                      />
-                      {tableError && <p className="text-red-500 text-xs mt-2 font-medium bg-red-50 p-1 rounded">{tableError}</p>}
-                      
-                      <div className="mt-5 flex gap-2">
-                         <button type="button" onClick={() => { setIsEnteringTable(false); setSelectedEstablishment(null); setTableNumber(''); setTableError(''); }} className="flex-1 bg-gray-100 text-gray-700 font-bold py-2 rounded-md text-sm hover:bg-gray-200">
-                            Cancelar
-                        </button>
-                        <button 
-                            type="submit" 
-                            className="flex-1 bg-green-600 text-white font-bold py-2 rounded-md text-sm hover:bg-green-700 shadow-md"
-                        >
-                            Entrar
-                        </button>
-                      </div>
-                  </form>
+                  {/* Se estiver fechado, mostra aviso em vez de input */}
+                  {!(establishments.get(selectedEstablishment.id) || selectedEstablishment).isOpen ? (
+                        <div>
+                             <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                             </div>
+                             <h2 className="text-lg font-bold text-gray-800 mb-2">Fechado</h2>
+                             <p className="text-sm text-gray-600 mb-4">O estabelecimento "{selectedEstablishment.name}" encerrou as atividades por hoje.</p>
+                             <button onClick={() => setIsEnteringTable(false)} className="w-full bg-gray-200 text-gray-800 font-bold py-2 rounded-md hover:bg-gray-300">Voltar</button>
+                        </div>
+                  ) : (
+                    <form onSubmit={handleTableSubmit}>
+                        <h2 className="text-lg font-bold mb-1 text-blue-800 truncate">{selectedEstablishment.name}</h2>
+                        <label htmlFor="tableNumber" className="block text-sm font-medium text-gray-600 my-3">Qual o número da mesa?</label>
+                        <input
+                            id="tableNumber"
+                            type="number"
+                            value={tableNumber}
+                            onChange={(e) => setTableNumber(e.target.value)}
+                            className="w-full text-center text-3xl font-bold p-3 border-2 border-gray-200 rounded-lg focus:ring-green-500 focus:border-green-500 text-gray-800"
+                            autoFocus
+                            required
+                            placeholder="#"
+                        />
+                        {tableError && <p className="text-red-500 text-xs mt-2 font-medium bg-red-50 p-1 rounded">{tableError}</p>}
+                        
+                        <div className="mt-5 flex gap-2">
+                            <button type="button" onClick={() => { setIsEnteringTable(false); setSelectedEstablishment(null); setTableNumber(''); setTableError(''); }} className="flex-1 bg-gray-100 text-gray-700 font-bold py-2 rounded-md text-sm hover:bg-gray-200">
+                                Cancelar
+                            </button>
+                            <button 
+                                type="submit" 
+                                className="flex-1 bg-green-600 text-white font-bold py-2 rounded-md text-sm hover:bg-green-700 shadow-md"
+                            >
+                                Entrar
+                            </button>
+                        </div>
+                    </form>
+                  )}
               </div>
           </div>
       )}
