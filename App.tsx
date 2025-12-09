@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { useAppContext } from './context/AppContext';
+import { useAppContext } from '../context/AppContext';
 import EstablishmentDashboard from './components/EstablishmentDashboard';
 import CustomerHome from './components/CustomerHome';
 import Login from './components/Login';

@@ -46,9 +46,15 @@ const initSupabase = () => {
             key = localStorage.getItem('supabase_key') || '';
         }
 
-        if (url && key && !supabase) {
-            if (!url.startsWith('http')) throw new Error("Invalid URL");
-            supabase = createClient(url, key);
+        // Only initialize if we have creds and no instance, or if instance is invalid
+        if (url && key) {
+             if (!supabase) {
+                if (!url.startsWith('http')) throw new Error("Invalid URL");
+                supabase = createClient(url, key);
+             }
+        } else {
+            // If no creds, ensure supabase is null
+            supabase = null;
         }
     } catch (e) {
         console.error("Failed to init supabase", e);
@@ -99,16 +105,18 @@ export const useMockData = () => {
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-      initSupabase();
+      // Initialize client
+      const client = initSupabase();
       
       const checkSession = async () => {
-          if (!supabase) {
+          // Extra defensive check: Ensure client exists AND has auth property
+          if (!client || !client.auth) {
               setIsInitialized(true); 
               return;
           }
 
           try {
-              const sessionPromise = supabase.auth.getSession();
+              const sessionPromise = client.auth.getSession();
               const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000));
 
               const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]) as any;
@@ -132,15 +140,24 @@ export const useMockData = () => {
       
       checkSession();
       
-      // Proteção adicionada aqui com '?.' antes de onAuthStateChange
-      const { data: authListener } = supabase?.auth?.onAuthStateChange(async (event: any, session: any) => {
-          if (event === 'SIGNED_IN' && session?.user) {
-              await fetchUserProfile(session.user.id, session.user.email!);
-          } else if (event === 'SIGNED_OUT') {
-              setCurrentUser(null);
-              setEstablishments(new Map());
+      let authListener: any = null;
+      
+      // Setup listener only if client is valid
+      if (client && client.auth) {
+          try {
+              const { data } = client.auth.onAuthStateChange(async (event: any, session: any) => {
+                  if (event === 'SIGNED_IN' && session?.user) {
+                      await fetchUserProfile(session.user.id, session.user.email!);
+                  } else if (event === 'SIGNED_OUT') {
+                      setCurrentUser(null);
+                      setEstablishments(new Map());
+                  }
+              });
+              authListener = data;
+          } catch (e) {
+              console.error("Error setting up auth listener", e);
           }
-      }) || { data: { subscription: { unsubscribe: () => {} } } };
+      }
 
       return () => {
           if (authListener && authListener.subscription) {
@@ -630,9 +647,16 @@ export const useMockData = () => {
   const searchEstablishmentByPhone = async (phone: string) => {
       if (!supabase) return null;
       const cleanSearch = sanitizePhone(phone);
-      const { data } = await withRetry<any>(() => supabase!.from('establishments').select('*').eq('phone', cleanSearch).maybeSingle());
-      if (data) {
-          return loadEstablishmentData(data.id);
+      // Use .limit(1) and handle potential array return to avoid crashing if duplicates exist
+      try {
+        const { data, error } = await withRetry<any>(() => supabase!.from('establishments').select('*').eq('phone', cleanSearch).limit(1));
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+            return loadEstablishmentData(data[0].id);
+        }
+      } catch (e) {
+          console.error("Erro ao buscar estabelecimento:", e);
       }
       return null;
   }
@@ -776,5 +800,6 @@ export const useMockData = () => {
     deleteCurrentUser,
     subscribeToEstablishmentCalls,
     checkTableAvailability,
+    loadCustomerData // Exposing this to allow manual refresh
   };
 };

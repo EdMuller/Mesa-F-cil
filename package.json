@@ -11,7 +11,7 @@
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "@supabase/supabase-js": "2"
+    "@supabase/supabase-js": "2.39.7"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
