@@ -161,14 +161,6 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
         return;
       }
 
-      // Verifica se a mesa já está em uso localmente (cache)
-      const table = freshEstablishment.tables.get(tableNumber);
-      const hasActiveCalls = table?.calls.some(c => c.status === 'SENT' || c.status === 'VIEWED');
-      if (hasActiveCalls) {
-          // Opcional: Bloquear ou Apenas Avisar
-          // setTableError("Mesa parece estar ocupada.");
-      }
-      
       const tableNum = parseInt(tableNumber, 10);
       const totalTables = freshEstablishment.settings?.totalTables || 20;
       
@@ -181,12 +173,12 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
       setIsEnteringTable(false);
   }
 
-  // Intercepta o Logout para limpar mesas abertas
+  // FIX 4: Intercepta o Logout para limpar mesas abertas se necessário
   const handleSafeLogout = async () => {
       // Verifica se há sessões ativas
       if (activeSessions.size > 0) {
           const confirmClose = window.confirm(
-              "Você possui mesas/chamados abertos. Sair do aplicativo irá fechar suas mesas e cancelar chamados pendentes. Deseja continuar?"
+              "Você possui mesas abertas. Sair do aplicativo encerrará suas mesas e cancelará chamados pendentes. Deseja continuar?"
           );
           if (confirmClose) {
               await clearAllSessions();
@@ -206,12 +198,14 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                 establishment={selectedEstablishment} 
                 tableNumber={tableNumber} 
                 onBack={() => {
-                    // Ao voltar, apenas limpa a seleção visual, mas NÃO fecha a mesa no banco
+                    // Ao voltar, apenas limpa a seleção visual local, mas NÃO fecha a mesa no banco
+                    // Isso permite navegar e abrir outra mesa
                     setSelectedEstablishment(null);
                     setTableNumber('');
                     setTableError('');
+                    // Se for convidado, volta para o passo anterior de seleção
                     if (isGuest && selectedEstablishment) {
-                        setIsEnteringTable(true); 
+                        // Não faz nada especial, apenas renderiza a Home
                     }
                 }}
              />

@@ -36,6 +36,7 @@ interface DBCall {
 // --- Initialize Supabase ---
 let supabase: any = null;
 
+// FIX CRÍTICO: Função blindada para evitar que dados corrompidos no Storage travem o app
 const initSupabase = () => {
     try {
         let url = (SUPABASE_CONFIG.url || '').trim().replace(/['"]/g, '');
@@ -49,20 +50,31 @@ const initSupabase = () => {
         if (url && key) {
              if (!supabase) {
                 if (!url.startsWith('http')) {
-                    console.warn("URL do Supabase inválida:", url);
+                    console.warn("URL do Supabase inválida encontrada e removida:", url);
+                    localStorage.removeItem('supabase_url');
+                    localStorage.removeItem('supabase_key');
                     return null;
                 }
-                supabase = createClient(url, key, {
-                    auth: {
-                        persistSession: true,
-                        autoRefreshToken: true,
-                    },
-                    realtime: {
-                        params: {
-                            eventsPerSecond: 10,
+                
+                try {
+                    supabase = createClient(url, key, {
+                        auth: {
+                            persistSession: true,
+                            autoRefreshToken: true,
+                            detectSessionInUrl: false, // Evita loops de redirect
                         },
-                    },
-                });
+                        realtime: {
+                            params: {
+                                eventsPerSecond: 10,
+                            },
+                        },
+                    });
+                } catch (clientErr) {
+                    console.error("Erro fatal ao criar cliente Supabase. Limpando credenciais.", clientErr);
+                    localStorage.removeItem('supabase_url');
+                    localStorage.removeItem('supabase_key');
+                    supabase = null;
+                }
              }
         } else {
             supabase = null;
@@ -115,10 +127,19 @@ export const useMockData = () => {
   const [customerProfiles, setCustomerProfiles] = useState<Map<string, CustomerProfile>>(new Map());
   const [isInitialized, setIsInitialized] = useState(false);
   
-  // Novo Estado: Rastreia sessões ativas (EstID:TableNum) localmente
+  // FIX 4: Rastreia sessões ativas (EstID:TableNum) localmente para permitir múltiplas mesas
   const [activeSessions, setActiveSessions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+      // Timeout de segurança: Se o Supabase demorar demais ou falhar silenciosamente,
+      // força a inicialização para que o app abra (mesmo que deslogado)
+      const safetyTimeout = setTimeout(() => {
+          if (!isInitialized) {
+              console.warn("Inicialização forçada por timeout.");
+              setIsInitialized(true);
+          }
+      }, 3000);
+
       const client = initSupabase();
       
       const checkSession = async () => {
@@ -128,14 +149,21 @@ export const useMockData = () => {
           }
 
           try {
-              const { data: { session } } = await client.auth.getSession();
+              const { data: { session }, error } = await client.auth.getSession();
+              if (error) throw error;
+              
               if (session?.user) {
                  await fetchUserProfile(session.user.id, session.user.email!);
               }
           } catch (error: any) {
-              console.warn("Session check failed:", error);
+              console.warn("Session check failed (pode ser token expirado):", error);
+              // Se o erro for crítico, limpa o token local para evitar travamento eterno
+              if (error.message && (error.message.includes("invalid claim") || error.message.includes("JWT"))) {
+                   await client.auth.signOut();
+              }
           } finally {
               setIsInitialized(true);
+              clearTimeout(safetyTimeout);
           }
       };
       
@@ -156,6 +184,7 @@ export const useMockData = () => {
       }
 
       return () => {
+          clearTimeout(safetyTimeout);
           if (authListener && authListener.subscription) {
               authListener.subscription.unsubscribe();
           }
@@ -192,8 +221,6 @@ export const useMockData = () => {
                   const { data: est } = await supabase.from('establishments').select('*').eq('owner_id', userId).single();
                   if (est) {
                       user.establishmentId = est.id;
-                      // Ao carregar o perfil (Login ou Refresh), assume-se que está online se for dono
-                      // Mas só atualizamos no DB se for um Login explícito. Aqui apenas carregamos.
                       await loadEstablishmentData(est.id);
                   }
               } 
@@ -448,7 +475,7 @@ export const useMockData = () => {
       }
   }, []);
 
-  // Track session locally
+  // FIX 4: Função para rastrear mesa ativa sem criar nada no banco (apenas memória local)
   const trackTableSession = useCallback((estId: string, tableNumber: string) => {
       const key = `${estId}:${tableNumber}`;
       setActiveSessions(prev => {
@@ -461,7 +488,7 @@ export const useMockData = () => {
   const addCall = useCallback(async (establishmentId: string, tableNumber: string, type: CallType) => {
       if (!supabase) return;
       
-      // Sempre rastreia a sessão ao fazer um chamado
+      // Sempre garante que a sessão está rastreada ao fazer um chamado
       trackTableSession(establishmentId, tableNumber);
 
       try {
@@ -486,6 +513,7 @@ export const useMockData = () => {
       await loadEstablishmentData(estId);
   };
   
+  // Encerra a mesa: Cancela chamados pendentes
   const leaveTable = useCallback(async (estId: string, tableNumber: string) => {
       if (!supabase) return;
       try {
@@ -495,7 +523,7 @@ export const useMockData = () => {
             .eq('table_number', tableNumber)
             .in('status', [CallStatus.SENT, CallStatus.VIEWED]);
         
-        // Remove da sessão ativa local se existir
+        // Remove da sessão ativa local
         const key = `${estId}:${tableNumber}`;
         setActiveSessions(prev => {
             const newSet = new Set(prev);
@@ -509,10 +537,10 @@ export const useMockData = () => {
       }
   }, []);
 
-  // Função para limpar TODAS as sessões ativas (usado no Logout)
+  // FIX 4: Função para limpar TODAS as sessões ativas (usado no Logout)
   const clearAllSessions = useCallback(async () => {
       const sessions = Array.from(activeSessions);
-      console.log("Limpando sessões:", sessions);
+      console.log("Limpando sessões abertas:", sessions);
       for (const session of sessions) {
           const [estId, tableNum] = (session as string).split(':');
           if (estId && tableNum) {
@@ -682,7 +710,7 @@ export const useMockData = () => {
     viewAllCallsForTable,
     closeTable,
     leaveTable,
-    clearAllSessions, // Exportado para Logout
+    clearAllSessions, // Exportado para Logout Seguro
     trackTableSession, // Exportado para Entrada na Mesa
     updateSettings, 
     getTableSemaphoreStatus,

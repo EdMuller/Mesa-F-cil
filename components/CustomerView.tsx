@@ -20,14 +20,15 @@ interface CustomerViewProps {
 const CustomerView: React.FC<CustomerViewProps> = ({ establishment: initialEstablishment, tableNumber, onBack }) => {
   const { establishments, subscribeToEstablishmentCalls, trackTableSession } = useAppContext();
   
-  // Obtém versão atualizada do contexto
+  // Obtém versão atualizada do contexto para reagir ao realtime
   const establishment = establishments.get(initialEstablishment.id) || initialEstablishment;
 
   // SUBSCRIPTION VITAL
   useEffect(() => {
       const unsubscribe = subscribeToEstablishmentCalls(establishment.id);
       
-      // REGISTRA A SESSÃO: Marca que o usuário está "nesta mesa"
+      // REGISTRA A SESSÃO: Marca que o usuário está ativo "nesta mesa"
+      // Isso permite ter várias mesas abertas ao mesmo tempo em abas/componentes diferentes
       trackTableSession(establishment.id, tableNumber);
 
       return () => {
@@ -53,7 +54,8 @@ const CustomerView: React.FC<CustomerViewProps> = ({ establishment: initialEstab
       )
   }
   
-  // FIX: Botão Voltar apenas navega, não limpa a mesa
+  // FIX 4: Botão Voltar apenas navega para a tela anterior (Home), 
+  // NÃO limpa a mesa e NEM cancela chamados. Isso permite abrir outra mesa.
   const handleBack = () => {
       onBack();
   }
