@@ -135,7 +135,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
 
     // Se estiver fechado, avisa, mas permite a seleção (para ver detalhes se quisesse, mas bloqueia mesa depois)
     if (!freshData.isOpen) {
-        setStatusMessage(`"${freshData.name}" está fechado.`);
+        setStatusMessage(`"${freshData.name}" - Estabelecimento Fechado no Momento`);
         setTimeout(() => setStatusMessage(''), 3000);
     }
     
@@ -152,7 +152,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
       const freshEstablishment = establishments.get(selectedEstablishment.id) || selectedEstablishment;
 
       if(!freshEstablishment.isOpen) {
-          setTableError("Estabelecimento fechado no momento.");
+          setTableError("Estabelecimento Fechado no Momento");
           return;
       }
       
@@ -335,7 +335,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ isGuest = false, onExitGues
                              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                              </div>
-                             <h2 className="text-lg font-bold text-gray-800 mb-2">Fechado</h2>
+                             <h2 className="text-lg font-bold text-gray-800 mb-2">Estabelecimento Fechado no Momento</h2>
                              <p className="text-sm text-gray-600 mb-4">O estabelecimento "{selectedEstablishment.name}" encerrou as atividades por hoje.</p>
                              <button onClick={() => setIsEnteringTable(false)} className="w-full bg-gray-200 text-gray-800 font-bold py-2 rounded-md hover:bg-gray-300">Voltar</button>
                         </div>

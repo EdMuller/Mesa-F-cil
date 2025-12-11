@@ -131,7 +131,7 @@ export const useMockData = () => {
   const [activeSessions, setActiveSessions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-      // Timeout de segurança: Se o Supabase demorar demais ou falhar silenciosamente,
+      // Timeout de segurança: Se o Supabase demorar mais ou falhar silenciosamente,
       // força a inicialização para que o app abra (mesmo que deslogado)
       const safetyTimeout = setTimeout(() => {
           if (!isInitialized) {
@@ -381,15 +381,10 @@ export const useMockData = () => {
           return;
       }
       
-      if (currentUser?.role === Role.ESTABLISHMENT && currentUser.establishmentId) {
-          try {
-             console.log("Fechando estabelecimento...");
-             await supabase.from('establishments').update({ is_open: false }).eq('id', currentUser.establishmentId);
-          } catch (e) { 
-              console.error("Erro ao fechar estabelecimento no logout", e); 
-          }
-      }
-
+      // FIX: Removido o fechamento automático do estabelecimento ao fazer logout.
+      // Isso permite que o dono faça logout (ex: para testar como cliente) sem fechar o estabelecimento
+      // para outros usuários ou dispositivos.
+      
       await supabase.auth.signOut();
       setCurrentUser(null);
       setEstablishments(new Map());
