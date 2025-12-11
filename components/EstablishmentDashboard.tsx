@@ -15,7 +15,7 @@ import { APP_URL, CALL_TYPE_INFO } from '../constants';
 
 
 const EstablishmentDashboard: React.FC = () => {
-  const { currentEstablishment, closeTable, viewAllCallsForTable, getTableSemaphoreStatus, logout, subscribeToEstablishmentCalls } = useAppContext();
+  const { currentEstablishment, closeTable, viewAllCallsForTable, getTableSemaphoreStatus, logout, closeEstablishmentWorkday, subscribeToEstablishmentCalls } = useAppContext();
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [isShareAppOpen, setShareAppOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
@@ -24,7 +24,6 @@ const EstablishmentDashboard: React.FC = () => {
   // Efeito para ativar o Realtime assim que o componente montar
   useEffect(() => {
       if (currentEstablishment) {
-          console.log("Iniciando escuta em tempo real para:", currentEstablishment.name);
           const unsubscribe = subscribeToEstablishmentCalls(currentEstablishment.id);
           return () => {
               unsubscribe && unsubscribe();
@@ -51,29 +50,60 @@ const EstablishmentDashboard: React.FC = () => {
       return acc;
     }, {} as Record<SemaphoreStatus, number>);
   }, [tablesWithStatus, currentEstablishment]);
+  
+  // REGRA 4: Botão para Fechar o Estabelecimento Explicitamente
+  const handleCloseShift = async () => {
+      if (!currentEstablishment) return;
+      
+      if (tablesWithStatus.length > 0) {
+          const confirm = window.confirm(
+              `Existem ${tablesWithStatus.length} mesas com chamados ativos. Encerrar o expediente irá CANCELAR todos esses chamados e fechar o estabelecimento. Deseja continuar?`
+          );
+          if (!confirm) return;
+      } else {
+          const confirm = window.confirm("Deseja realmente encerrar o expediente e fechar o estabelecimento para clientes?");
+          if (!confirm) return;
+      }
+
+      await closeEstablishmentWorkday(currentEstablishment.id);
+      // Após fechar o dia, fazemos logout
+      logout();
+  }
 
   if (!currentEstablishment) {
     return (
         <div className="flex flex-col items-center justify-center h-screen p-4 bg-gray-50">
             <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
             <p className="text-gray-600 font-medium mb-6">Carregando painel do estabelecimento...</p>
-            
-            {/* BOTÃO DE ESCAPE PARA O TRAVAMENTO */}
-            <button 
-                onClick={logout} 
-                className="px-6 py-2 bg-white border border-red-300 text-red-600 rounded-md hover:bg-red-50 font-bold shadow-sm"
-            >
-                Cancelar / Sair
-            </button>
+            <button onClick={logout} className="px-6 py-2 bg-white border border-red-300 text-red-600 rounded-md hover:bg-red-50 font-bold shadow-sm">Cancelar / Sair</button>
         </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-100 pb-20">
-      <Header onBack={logout} isEstablishment/>
+      <Header onBack={logout} isEstablishment backText="Sair (Manter Aberto)" />
       
       <main className="p-4 md:p-6 max-w-7xl mx-auto">
+        
+        {/* TOP BAR COM STATUS E AÇÃO DE FECHAR DIA */}
+        <div className="flex flex-col sm:flex-row justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <div className="flex items-center gap-2 mb-3 sm:mb-0">
+                <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
+                <span className="text-green-700 font-bold text-sm uppercase tracking-wide">Estabelecimento Aberto</span>
+            </div>
+            
+            <button 
+                onClick={handleCloseShift}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-red-700 shadow transition-colors text-sm flex items-center gap-2 w-full sm:w-auto justify-center"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                Encerrar Expediente
+            </button>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <SemaphoreCard status={SemaphoreStatus.GREEN} count={semaphoreCounts.GREEN || 0} />
           <SemaphoreCard status={SemaphoreStatus.YELLOW} count={semaphoreCounts.YELLOW || 0} />
@@ -83,7 +113,13 @@ const EstablishmentDashboard: React.FC = () => {
         <div className="bg-white rounded-xl shadow-md p-4">
           <h2 className="text-xl font-bold mb-4">Mesas com Chamados</h2>
           {tablesWithStatus.length === 0 ? (
-             <p className="text-center text-gray-500 py-8">Nenhum chamado ativo no momento.</p>
+             <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                 </svg>
+                 <p className="text-lg font-medium">Tudo tranquilo!</p>
+                 <p className="text-sm">Nenhum chamado pendente no momento.</p>
+             </div>
           ) : (
             <div className="space-y-4">
               {tablesWithStatus.map(table => (
@@ -139,10 +175,10 @@ const SemaphoreCard: React.FC<{ status: SemaphoreStatus; count: number }> = ({ s
   if(status === SemaphoreStatus.IDLE) return null;
 
   return (
-    <div className={`p-4 rounded-lg shadow ${colors[status].bg} ${colors[status].text}`}>
+    <div className={`p-4 rounded-lg shadow ${colors[status].bg} ${colors[status].text} flex-1`}>
       <div className="flex justify-between items-center">
-        <span className="font-semibold text-lg">{colors[status].label}</span>
-        <span className="text-3xl font-bold">{count}</span>
+        <span className="font-semibold text-base md:text-lg">{colors[status].label}</span>
+        <span className="text-2xl md:text-3xl font-bold">{count}</span>
       </div>
     </div>
   );
@@ -189,9 +225,9 @@ const TableCard: React.FC<TableCardProps> = ({ table, onCloseTable, onViewCalls,
   return (
     <div className={`border-l-4 ${semaphoreColors[semaphore]} bg-gray-50 rounded-lg p-3 shadow-sm transition-all duration-300 ${hasUnseenCalls ? 'animate-pulse-bg' : ''}`}>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h3 className="text-2xl font-bold text-gray-800 whitespace-nowrap">Mesa {table.number}</h3>
+        <h3 className="text-2xl font-bold text-gray-800 whitespace-nowrap pl-2">Mesa {table.number}</h3>
         
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end flex-grow">
            {Object.entries(callsByType).map(([type, count]) => (
              <CallActionButton
                 key={type}
@@ -203,8 +239,8 @@ const TableCard: React.FC<TableCardProps> = ({ table, onCloseTable, onViewCalls,
            ))}
         </div>
         
-        <div className="flex items-center gap-2">
-          <button onClick={onCloseTable} className="bg-red-500 text-white px-3 py-1 text-sm rounded-md hover:bg-red-600 w-full sm:w-auto">Fechar Mesa</button>
+        <div className="flex items-center gap-2 sm:border-l sm:pl-4 sm:border-gray-200">
+          <button onClick={onCloseTable} className="bg-red-500 text-white px-3 py-1.5 text-sm rounded-md hover:bg-red-600 w-full sm:w-auto font-medium">Fechar Mesa</button>
         </div>
       </div>
     </div>
@@ -223,7 +259,7 @@ const CallActionButton: React.FC<{callType: CallType, count: number, table: Tabl
     };
 
     return (
-        <button onClick={onClick} className={`text-white px-3 py-1 text-sm rounded-md transition-colors font-semibold ${semaphoreClasses[status]}`}>
+        <button onClick={onClick} className={`text-white px-3 py-1.5 text-sm rounded-md transition-colors font-semibold shadow-sm ${semaphoreClasses[status]}`}>
             {CALL_TYPE_INFO[callType].label} ({count})
         </button>
     )
