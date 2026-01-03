@@ -13,14 +13,22 @@ const AppContext = createContext<AppContextType | null>(null);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const mockData = useMockData();
   
-  const [showConfig, setShowConfig] = useState(() => {
-      if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey) {
-          return false;
+  // Lógica: Se tem URL/Key no LocalStorage, ou se as constantes padrão funcionam, não mostra config.
+  // Mas se falhar a conexão, vamos forçar mostrar.
+  const [showConfig, setShowConfig] = useState(false);
+
+  useEffect(() => {
+      // Verifica se precisa de config no boot
+      const hasLocal = localStorage.getItem('supabase_url') && localStorage.getItem('supabase_key');
+      const hasConst = SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey;
+      
+      if (!hasLocal && !hasConst) {
+          setShowConfig(true);
+      } else if (mockData.initError) {
+          // Se o hook reportou erro de init, abre o modal de config para corrigir
+          setShowConfig(true);
       }
-      const url = localStorage.getItem('supabase_url');
-      const key = localStorage.getItem('supabase_key');
-      return !url || !key;
-  });
+  }, [mockData.initError]);
 
   const handleConfigSave = () => {
       window.location.reload();
@@ -42,7 +50,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const content = () => {
       if (showConfig) return <ConfigModal onSave={handleConfigSave} />;
       if (mockData.isInitialized) return children;
-      return <LoadingScreen onForceInit={() => mockData.setIsInitialized(true)} error={mockData.initError} />;
+      return <LoadingScreen onForceInit={() => mockData.setIsInitialized(true)} error={mockData.initError} onOpenConfig={() => setShowConfig(true)} />;
   };
 
   return (
@@ -60,7 +68,7 @@ export const useAppContext = () => {
   return context;
 };
 
-const LoadingScreen: React.FC<{ onForceInit: () => void; error?: string | null }> = ({ onForceInit, error }) => {
+const LoadingScreen: React.FC<{ onForceInit: () => void; error?: string | null, onOpenConfig: () => void }> = ({ onForceInit, error, onOpenConfig }) => {
     const { logout, resetConfig } = useAppContext(); 
     const [showOptions, setShowOptions] = useState(false);
 
@@ -88,6 +96,13 @@ const LoadingScreen: React.FC<{ onForceInit: () => void; error?: string | null }
                     <p className="text-xs text-red-500 mb-2 font-medium">A conexão está demorando mais que o esperado.</p>
                     
                     <button 
+                        onClick={onOpenConfig}
+                        className="w-full bg-yellow-100 text-yellow-800 border border-yellow-200 px-4 py-3 rounded-xl text-sm font-bold hover:bg-yellow-200 transition-colors"
+                    >
+                        Configurar Servidor Manualmente
+                    </button>
+
+                    <button 
                         onClick={onForceInit}
                         className="w-full bg-blue-600 text-white px-4 py-3 rounded-xl text-sm font-bold shadow-md hover:bg-blue-700 transition-colors"
                     >
@@ -100,16 +115,9 @@ const LoadingScreen: React.FC<{ onForceInit: () => void; error?: string | null }
                     >
                         Deslogar e Recomeçar
                     </button>
-
-                    <button 
-                        onClick={resetConfig}
-                        className="w-full text-blue-600 text-xs font-semibold py-2 hover:underline"
-                    >
-                        Configurar Servidor Manualmente
-                    </button>
                     
                     <p className="text-[10px] text-gray-400 mt-4 leading-tight">
-                        Dica: Verifique sua conexão. Se o banco de dados estiver inativo, o sistema pode demorar para responder.
+                        Dica: Se você estiver fora do editor, pode ser necessário configurar a URL do Supabase manualmente.
                     </p>
                 </div>
             )}

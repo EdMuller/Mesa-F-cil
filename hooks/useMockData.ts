@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Establishment, Table, CallType, CallStatus, Settings, SemaphoreStatus, User, Role, CustomerProfile, UserStatus } from '../types';
@@ -20,8 +19,9 @@ let supabaseInstance: any = null;
 const initSupabase = () => {
     if (supabaseInstance) return supabaseInstance;
     try {
-        const url = SUPABASE_CONFIG.url?.trim() || localStorage.getItem('supabase_url')?.trim();
-        const key = SUPABASE_CONFIG.anonKey?.trim() || localStorage.getItem('supabase_key')?.trim();
+        // Tenta pegar do LocalStorage primeiro (override), senão usa a config fixa
+        const url = localStorage.getItem('supabase_url')?.trim() || SUPABASE_CONFIG.url?.trim();
+        const key = localStorage.getItem('supabase_key')?.trim() || SUPABASE_CONFIG.anonKey?.trim();
 
         if (url && key && url.startsWith('http')) {
             console.log("[System] Inicializando cliente Supabase...");
@@ -75,18 +75,16 @@ export const useMockData = () => {
           
           try {
               // Verifica sessão. Se falhar, assume deslogado, mas não trava.
-              const { data: { session }, error } = await client.auth.getSession();
+              const { data: { session }, error } = await withTimeout(client.auth.getSession(), 5000, "SessionCheck") as any;
               
               if (session?.user) {
-                  // Tenta carregar perfil. Se der erro 406/400, recria perfil básico na memória para não travar
                   await fetchUserProfile(session.user.id, session.user.email!).catch(err => {
                       console.error("[Boot] Erro ao carregar perfil (Recuperação Ativa):", err);
-                      // Fallback: Cria usuário básico na memória para permitir o login
                       const fallbackUser: User = {
                           id: session.user.id,
                           email: session.user.email!,
                           password: '',
-                          role: Role.CUSTOMER, // Assume cliente por segurança se falhar
+                          role: Role.CUSTOMER,
                           name: "Usuário Recuperado",
                           status: UserStatus.TESTING
                       };
@@ -95,6 +93,7 @@ export const useMockData = () => {
               }
           } catch (e) {
               console.error("[Boot] Exceção:", e);
+              setInitError("Falha na conexão inicial. Verifique as configurações.");
           } finally {
               setIsInitialized(true);
           }
@@ -124,32 +123,30 @@ export const useMockData = () => {
           setIsUpdating(true); 
           try {
               if (currentUser.role === Role.ESTABLISHMENT) {
-                  // Se temos ID, atualiza. Se não, tenta achar o ID.
                   if (currentUser.establishmentId) {
                       await Promise.all([
                           sendHeartbeat(currentUser.establishmentId),
-                          loadEstablishmentData(currentUser.establishmentId)
+                          loadEstablishmentData(currentUser.establishmentId, true) // TRUE = Carregar chamados (Dono)
                       ]);
                   } else {
                        const sb = getSb();
-                       // Use maybeSingle e colunas específicas para evitar 400/406
                        const { data: est } = await sb.from('establishments').select('id').eq('owner_id', currentUser.id).maybeSingle();
                        if (est) {
                            setCurrentUser(prev => prev ? {...prev, establishmentId: est.id} : null);
-                           await loadEstablishmentData(est.id);
+                           await loadEstablishmentData(est.id, true);
                        }
                   }
               } else if (currentUser.role === Role.CUSTOMER) {
                   const profile = customerProfiles.get(currentUser.id);
                   if (profile?.favoritedEstablishmentIds) {
-                      // Carrega um por um para que um erro não trave todos
                       for (const id of profile.favoritedEstablishmentIds) {
-                          await loadEstablishmentData(id).catch(console.error);
+                          // FALSE = Não carregar chamados, apenas status (Cliente)
+                          await loadEstablishmentData(id, false).catch(console.error);
                       }
                   }
               }
           } catch (e) {
-              // Silencia erros no polling para não poluir console
+              // Silencia erros no polling
           } finally {
               setIsUpdating(false);
           }
@@ -165,44 +162,29 @@ export const useMockData = () => {
   const sendHeartbeat = async (estId: string) => {
       const sb = getSb();
       if (!sb) return;
-      // Envia APENAS o is_open. Se falhar, apenas loga.
-      // 400 aqui significa que o ID não bate ou a coluna não existe (impossível se criado via app)
       await sb.from('establishments').update({ is_open: true }).eq('id', estId).then(({error}: any) => {
           if(error) console.warn(`[Heartbeat] Falha silenciosa: ${error.message}`);
       });
   };
 
-  const loadEstablishmentData = async (estId: string) => {
+  // shouldLoadCalls: boolean -> Controla se tentamos baixar a tabela 'calls'. 
+  // Clientes não têm permissão de ler chamados de lojas que não são donos, então deve ser FALSE para buscas/favoritos.
+  const loadEstablishmentData = async (estId: string, shouldLoadCalls: boolean = false) => {
       const sb = getSb();
       if (!sb) return null;
       
       try {
-          // SELECT EXPLÍCITO: Evita select(*) que causa erro 400 se houver colunas fantasmas
           const columns = 'id, owner_id, name, phone, photo_url, phrase, is_open, settings';
           const { data: est, error: estError } = await withTimeout(
               sb.from('establishments').select(columns).eq('id', estId).maybeSingle()
           ) as any;
 
-          // MODO DE EMERGÊNCIA: Se o banco falhar (400/406), retornamos um objeto mockado
-          // para que o usuário consiga acessar o painel e ver que está logado.
           if (estError || !est) {
-              console.warn(`[LoadEst] Falha ao carregar do banco (${estError?.code}). Usando modo offline.`);
-              // Se já temos dados na memória, mantemos. Se não, criamos um placeholder.
-              if (establishments.has(estId)) return establishments.get(estId)!;
-              
+              // Fallback para dono (Modo Offline)
               if (currentUser?.role === Role.ESTABLISHMENT && currentUser.establishmentId === estId) {
-                  // Cria um estabelecimento "Virtual" para o dono conseguir entrar
                   const fallbackEst: Establishment = {
-                      id: estId,
-                      ownerId: currentUser.id,
-                      name: currentUser.name || "Meu Restaurante (Offline)",
-                      phone: "000000000",
-                      photoUrl: "",
-                      phrase: "Modo de Recuperação",
-                      settings: DEFAULT_SETTINGS,
-                      tables: new Map(),
-                      eventLog: [],
-                      isOpen: true
+                      id: estId, ownerId: currentUser.id, name: currentUser.name || "Offline", phone: "000000000",
+                      photoUrl: "", phrase: "Modo de Recuperação", settings: DEFAULT_SETTINGS, tables: new Map(), eventLog: [], isOpen: true
                   };
                   setEstablishments(prev => new Map(prev).set(estId, fallbackEst));
                   return fallbackEst;
@@ -210,23 +192,28 @@ export const useMockData = () => {
               return null;
           }
 
-          // Carrega chamados
-          const { data: calls } = await sb.from('calls').select('id, type, status, table_number, created_at_ts').eq('establishment_id', estId).in('status', ['SENT', 'VIEWED']);
-
           const tablesMap = new Map<string, Table>();
           
-          if (calls) {
-              (calls as DBCall[]).forEach((c: DBCall) => {
-                  const existing = tablesMap.get(c.table_number) || { number: c.table_number, calls: [] };
-                  existing.calls.push({ id: c.id, type: c.type, status: c.status, createdAt: c.created_at_ts });
-                  tablesMap.set(c.table_number, existing);
-              });
+          // Só carrega chamados se for o dono ou se estivermos na visualização interna da mesa (futuro)
+          if (shouldLoadCalls) {
+             const { data: calls } = await sb.from('calls').select('id, type, status, table_number, created_at_ts').eq('establishment_id', estId).in('status', ['SENT', 'VIEWED']);
+             if (calls) {
+                  (calls as DBCall[]).forEach((c: DBCall) => {
+                      const existing = tablesMap.get(c.table_number) || { number: c.table_number, calls: [] };
+                      existing.calls.push({ id: c.id, type: c.type, status: c.status, createdAt: c.created_at_ts });
+                      tablesMap.set(c.table_number, existing);
+                  });
+              }
           }
 
-          const totalTables = est.settings?.totalTables || DEFAULT_SETTINGS.totalTables;
-          for(let i=1; i<=totalTables; i++) {
-              const num = i.toString();
-              if(!tablesMap.has(num)) tablesMap.set(num, { number: num, calls: [] });
+          // Preencher mesas vazias apenas se carregamos chamados (Dashboard)
+          // Se for cliente vendo favoritos, não precisa criar 50 mesas na memória
+          if (shouldLoadCalls) {
+            const totalTables = est.settings?.totalTables || DEFAULT_SETTINGS.totalTables;
+            for(let i=1; i<=totalTables; i++) {
+                const num = i.toString();
+                if(!tablesMap.has(num)) tablesMap.set(num, { number: num, calls: [] });
+            }
           }
 
           const fullEst: Establishment = {
@@ -247,12 +234,9 @@ export const useMockData = () => {
       const sb = getSb();
       if (!sb) return;
       
-      // SELECT EXPLÍCITO e MAYBESINGLE para evitar 406
       const { data: profile, error } = await sb.from('profiles').select('id, role, name, status').eq('id', userId).maybeSingle();
       
       if (error || !profile) {
-          console.warn("[FetchProfile] Perfil não encontrado. Criando perfil temporário.");
-          // Se não achar perfil, cria um objeto local para não travar o login
           const tempUser: User = { 
               id: userId, email, password: '', role: Role.CUSTOMER, name: 'Usuário', status: UserStatus.TESTING 
           };
@@ -267,12 +251,11 @@ export const useMockData = () => {
       setCurrentUser(user);
 
       if (user.role === Role.ESTABLISHMENT) {
-          // Tenta achar o link do estabelecimento
           const { data: est } = await sb.from('establishments').select('id').eq('owner_id', userId).maybeSingle();
           if (est) {
               user.establishmentId = est.id;
               setCurrentUser(prev => prev ? { ...prev, establishmentId: est.id } : null);
-              await loadEstablishmentData(est.id);
+              await loadEstablishmentData(est.id, true); // Dono carrega TUDO
           }
       } else {
           loadCustomerData(userId);
@@ -290,7 +273,8 @@ export const useMockData = () => {
           setCustomerProfiles(prev => new Map(prev).set(userId, profile));
           
           if (favIds.length > 0) {
-             favIds.forEach(id => loadEstablishmentData(id));
+             // Carrega apenas informações básicas dos favoritos (sem chamados)
+             favIds.forEach(id => loadEstablishmentData(id, false));
           }
       } catch (e) {}
   };
@@ -307,25 +291,18 @@ export const useMockData = () => {
   const logout = useCallback(async () => {
       const sb = getSb();
       if (currentUser?.role === Role.ESTABLISHMENT && currentUser.establishmentId) {
-          // Tenta fechar, mas sem await para não travar logout se der 400
           sb.from('establishments').update({ is_open: false }).eq('id', currentUser.establishmentId).then(() => {});
       }
       await sb.auth.signOut();
       setCurrentUser(null);
   }, [currentUser]);
 
-  // Recuperação forçada
   const restoreEstablishment = async () => {
       if(!currentUser) return;
       const sb = getSb();
-      // Força inserção básica
       try {
         await sb.from('establishments').insert({ 
-            owner_id: currentUser.id, 
-            name: currentUser.name, 
-            phone: "000000000", 
-            settings: DEFAULT_SETTINGS, 
-            is_open: true 
+            owner_id: currentUser.id, name: currentUser.name, phone: "000000000", settings: DEFAULT_SETTINGS, is_open: true 
         });
         window.location.reload();
       } catch(e) { alert("Erro na restauração"); }
@@ -338,7 +315,6 @@ export const useMockData = () => {
       currentCustomerProfile: currentUser?.id ? customerProfiles.get(currentUser.id) : null,
       login, logout, restoreEstablishment,
       
-      // Funções de escrita mantidas simples
       registerEstablishment: async (name: string, phone: string, email: string, password: string, photo: string | null, phrase: string) => {
           const sb = getSb();
           const { data, error } = await sb.auth.signUp({ email, password });
@@ -363,21 +339,43 @@ export const useMockData = () => {
       searchEstablishmentByPhone: async (phone: string) => {
           const sb = getSb();
           const clean = sanitizePhone(phone);
-          const { data } = await sb.from('establishments').select('id').eq('phone', clean).maybeSingle();
+          
+          // BUSCA LEVE: Não usamos loadEstablishmentData para evitar carregar 'calls' e travar no RLS
+          const columns = 'id, owner_id, name, phone, photo_url, phrase, is_open, settings';
+          const { data } = await sb.from('establishments').select(columns).eq('phone', clean).maybeSingle();
+          
           if (!data) return null;
-          return await loadEstablishmentData(data.id);
+
+          // Cria objeto Establishment manual
+          const est: Establishment = {
+              id: data.id,
+              ownerId: data.owner_id,
+              name: data.name,
+              phone: data.phone,
+              photoUrl: data.photo_url,
+              phrase: data.phrase,
+              settings: data.settings || DEFAULT_SETTINGS,
+              tables: new Map(), // Vazio para busca
+              eventLog: [],
+              isOpen: data.is_open === true
+          };
+
+          // Salva no cache local (State)
+          setEstablishments(prev => new Map(prev).set(est.id, est));
+          
+          return est;
       },
       addCall: async (estId: string, tableNum: string, type: CallType) => {
           const sb = getSb();
           await sb.from('calls').insert({ establishment_id: estId, table_number: tableNum, type, status: CallStatus.SENT, created_at_ts: Date.now() });
-          // Atualiza localmente imediatamente
-          loadEstablishmentData(estId);
+          // Ao fazer um chamado, o cliente "entra" na sessão, então agora ele pode tentar carregar chamados
+          loadEstablishmentData(estId, true);
       },
       closeEstablishmentWorkday: async (id: string) => {
           const sb = getSb();
           await sb.from('establishments').update({ is_open: false }).eq('id', id);
           await sb.from('calls').update({ status: CallStatus.CANCELED }).eq('establishment_id', id).in('status', ['SENT', 'VIEWED']);
-          loadEstablishmentData(id);
+          loadEstablishmentData(id, true);
       },
       checkPendingCallsOnLogin: async (id: string) => {
           const sb = getSb();
@@ -389,7 +387,7 @@ export const useMockData = () => {
           const { data } = await sb.from('calls').select('id').eq('establishment_id', estId).eq('table_number', tableNum).eq('type', type).in('status', ['SENT', 'VIEWED']).order('created_at_ts', {ascending: true}).limit(1);
           if (data?.[0]) {
               await sb.from('calls').update({ status: CallStatus.ATTENDED }).eq('id', data[0].id);
-              loadEstablishmentData(estId);
+              loadEstablishmentData(estId, true);
           }
       },
       cancelOldestCallByType: async (estId: string, tableNum: string, type: CallType) => {
@@ -397,7 +395,7 @@ export const useMockData = () => {
           const { data } = await sb.from('calls').select('id').eq('establishment_id', estId).eq('table_number', tableNum).eq('type', type).in('status', ['SENT', 'VIEWED']).order('created_at_ts', {ascending: true}).limit(1);
           if (data?.[0]) {
               await sb.from('calls').update({ status: CallStatus.CANCELED }).eq('id', data[0].id);
-              loadEstablishmentData(estId);
+              loadEstablishmentData(estId, true);
           }
       },
       viewAllCallsForTable: async (estId: string, tableNum: string) => {
@@ -405,13 +403,13 @@ export const useMockData = () => {
           const { data } = await sb.from('calls').select('id').eq('establishment_id', estId).eq('table_number', tableNum).eq('status', CallStatus.SENT);
           if (data?.length) {
               await sb.from('calls').update({ status: CallStatus.VIEWED }).in('id', data.map((c: any) => c.id));
-              loadEstablishmentData(estId);
+              loadEstablishmentData(estId, true);
           }
       },
       closeTable: async (estId: string, tableNum: string) => {
           const sb = getSb();
           await sb.from('calls').update({ status: CallStatus.ATTENDED }).eq('establishment_id', estId).eq('table_number', tableNum).in('status', ['SENT', 'VIEWED']);
-          loadEstablishmentData(estId);
+          loadEstablishmentData(estId, true);
       },
       favoriteEstablishment: async (uid: string, estId: string) => { 
           await getSb().from('customer_favorites').insert({ user_id: uid, establishment_id: estId }); 
@@ -423,7 +421,7 @@ export const useMockData = () => {
       },
       updateSettings: async (id: string, s: Settings) => { 
           await getSb().from('establishments').update({ settings: s }).eq('id', id); 
-          loadEstablishmentData(id); 
+          loadEstablishmentData(id, true); 
       },
       updateUserStatus: async (userId: string, status: UserStatus) => {
           const sb = getSb();
@@ -461,12 +459,7 @@ export const useMockData = () => {
           const { data, error } = await sb.from('profiles').select('*');
           if (!error && data) {
               setUsers(data.map((p: any) => ({
-                  id: p.id,
-                  email: p.email,
-                  password: '',
-                  role: p.role as Role,
-                  name: p.name,
-                  status: p.status as UserStatus
+                  id: p.id, email: p.email, password: '', role: p.role as Role, name: p.name, status: p.status as UserStatus
               })));
           }
       } 
