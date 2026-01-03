@@ -46,10 +46,14 @@ const TabButton: React.FC<{ label: string; isActive: boolean; onClick: () => voi
 );
 
 const UserManagementSection = () => {
-    const { users, registerCustomer, registerEstablishment, updateUserStatus } = useAppContext();
+    const { users, registerCustomer, registerEstablishment, updateUserStatus, loadAllUsers } = useAppContext();
     const [formType, setFormType] = useState<Role.CUSTOMER | Role.ESTABLISHMENT>(Role.CUSTOMER);
     const [feedback, setFeedback] = useState('');
     const [isProcessing, setIsProcessing] = useState<string | null>(null);
+
+    useEffect(() => {
+        loadAllUsers();
+    }, []);
 
     const handleSubmit = async (formData: any) => {
         try {
@@ -61,6 +65,7 @@ const UserManagementSection = () => {
             }
             setFeedback(`Usuário '${newUser.name}' criado com sucesso!`);
             setTimeout(() => setFeedback(''), 3000);
+            loadAllUsers(); // Reload list after creation
             return true;
         } catch (err: any) {
             setFeedback("Erro: " + err.message);
